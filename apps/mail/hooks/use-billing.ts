@@ -1,7 +1,6 @@
 import { useAutumn, useCustomer } from 'autumn-js/react';
-import { signOut } from '@/lib/auth-client';
 import { isProCustomer } from '@/lib/utils';
-import { useEffect, useMemo } from 'react';
+import { useMemo } from 'react';
 
 type FeatureState = {
   total: number;
@@ -60,12 +59,8 @@ const FEATURE_IDS = {
 } as const;
 
 export const useBilling = () => {
-  const { customer, refetch, isLoading, error } = useCustomer();
+  const { customer, refetch, isLoading } = useCustomer();
   const { attach, track, openBillingPortal } = useAutumn();
-
-  useEffect(() => {
-    if (error) signOut();
-  }, [error]);
 
   const { isPro, ...customerFeatures } = useMemo(() => {
     const isPro = customer ? isProCustomer(customer) : false;
