@@ -20,6 +20,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { TextEffect } from '@/components/motion-primitives/text-effect';
 import { ScheduleSendPicker } from './schedule-send-picker';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useActiveConnection } from '@/hooks/use-connections';
 import { useEmailAliases } from '@/hooks/use-email-aliases';
 import useComposeEditor from '@/hooks/use-compose-editor';
 import { CurvedArrow, Sparkles, X } from '../icons/icons';
@@ -114,6 +115,7 @@ export function EmailComposer({
   editorClassName,
 }: EmailComposerProps) {
   const { data: aliases } = useEmailAliases();
+  const { data: activeConnection } = useActiveConnection();
   const { data: settings } = useSettings();
   const [showCc, setShowCc] = useState(initialCc.length > 0);
   const [showBcc, setShowBcc] = useState(initialBcc.length > 0);
@@ -232,6 +234,7 @@ export function EmailComposer({
       message: initialMessage,
       attachments: initialAttachments,
       fromEmail:
+        aliases?.find((alias) => alias.email === activeConnection?.email)?.email ||
         settings?.settings?.defaultEmailAlias ||
         aliases?.find((alias) => alias.primary)?.email ||
         aliases?.[0]?.email ||
@@ -579,6 +582,7 @@ export function EmailComposer({
   // keep fromEmail in sync when settings or aliases load afterwards
   useEffect(() => {
     const preferred =
+      aliases?.find((alias) => alias.email === activeConnection?.email)?.email ??
       settings?.settings?.defaultEmailAlias ??
       aliases?.find((a) => a.primary)?.email ??
       aliases?.[0]?.email;
@@ -586,7 +590,7 @@ export function EmailComposer({
     if (preferred && getValues('fromEmail') !== preferred) {
       setValue('fromEmail', preferred, { shouldDirty: false });
     }
-  }, [settings?.settings?.defaultEmailAlias, aliases, getValues, setValue]);
+  }, [activeConnection?.email, settings?.settings?.defaultEmailAlias, aliases, getValues, setValue]);
 
   const handleQualityChange = async (newQuality: ImageQuality) => {
     setImageQuality(newQuality);
