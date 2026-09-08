@@ -42,6 +42,7 @@ import { ZeroMCP } from './routes/agent/mcp';
 import { publicRouter } from './routes/auth';
 import { WorkflowRunner } from './pipelines';
 import { consumeGmailPollJob, gmailPollFailure } from './lib/gmail-poll-state';
+import { processMailboxWorkflowCron } from './lib/mailbox-workflows';
 import { initTracing } from './lib/tracing';
 import { env, type ZeroEnv } from './env';
 import type { HonoContext } from './ctx';
@@ -1062,6 +1063,9 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
     console.log('Running scheduled tasks...');
 
     await this.processScheduledEmails();
+    await processMailboxWorkflowCron(this.env).catch((error) => {
+      console.error('[MAILBOX_WORKFLOWS] Scheduled processing failed', error);
+    });
     await this.pollGoogleMailboxes();
     await this.processExpiredSubscriptions();
   }

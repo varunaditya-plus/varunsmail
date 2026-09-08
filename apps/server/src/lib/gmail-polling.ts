@@ -37,6 +37,7 @@ import type { ZeroEnv } from '../env';
 import { eq } from 'drizzle-orm';
 import { createDb } from '../db';
 import { Effect } from 'effect';
+import { applyMailboxWorkflowPolicy } from './mailbox-workflows';
 
 const getConnection = async (env: ZeroEnv, connectionId: string) => {
   const { db } = createDb(env.DB);
@@ -282,6 +283,7 @@ export async function refreshPolledThread(
       await env.snoozed_emails.get(`${job.threadId}__${job.connectionId}`),
     );
     if (!thread.latest) throw new Error('Gmail thread has no latest message');
+    if (await applyMailboxWorkflowPolicy(env, mailbox, thread)) return;
     const currentMessageIds = new Set(thread.messages.map(({ id }) => id));
     for (const message of previous?.messages ?? []) {
       if (!currentMessageIds.has(message.id)) removedMessageIds.add(message.id);

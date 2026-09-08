@@ -311,6 +311,7 @@ export const emailTemplate = createTable(
       .notNull()
       .references(() => user.id, { onDelete: 'cascade' }),
     name: text('name').notNull(),
+    kind: text('kind').$type<'template' | 'snippet'>().notNull().default('template'),
     subject: text('subject'),
     body: text('body'),
     to: text('to', { mode: 'json' }),
@@ -326,6 +327,268 @@ export const emailTemplate = createTable(
   (t) => [
     index('idx_mail0_email_template_user_id').on(t.userId),
     unique('mail0_email_template_user_id_name_unique').on(t.userId, t.name),
+  ],
+);
+
+export const threadReminder = createTable(
+  'thread_reminder',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    connectionId: text('connection_id')
+      .notNull()
+      .references(() => connection.id, { onDelete: 'cascade' }),
+    threadId: text('thread_id').notNull(),
+    sentMessageId: text('sent_message_id').notNull(),
+    dueAt: integer('due_at', { mode: 'timestamp_ms' }).notNull(),
+    status: text('status')
+      .$type<'pending' | 'processing' | 'fired' | 'cancelled'>()
+      .notNull()
+      .default('pending'),
+    attemptCount: integer('attempt_count').notNull().default(0),
+    lastError: text('last_error'),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+  },
+  (t) => [
+    unique('mail0_thread_reminder_connection_thread_unique').on(t.connectionId, t.threadId),
+    index('mail0_thread_reminder_due_idx').on(t.status, t.dueAt),
+    index('mail0_thread_reminder_user_idx').on(t.userId, t.connectionId),
+  ],
+);
+
+export const senderScreeningConfig = createTable(
+  'sender_screening_config',
+  {
+    connectionId: text('connection_id')
+      .primaryKey()
+      .references(() => connection.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    enabled: integer('enabled', { mode: 'boolean' }).notNull().default(false),
+    enabledAt: integer('enabled_at', { mode: 'timestamp_ms' }),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+  },
+  (t) => [index('mail0_sender_screening_config_user_idx').on(t.userId)],
+);
+
+export const senderDecision = createTable(
+  'sender_decision',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    connectionId: text('connection_id')
+      .notNull()
+      .references(() => connection.id, { onDelete: 'cascade' }),
+    email: text('email').notNull(),
+    name: text('name'),
+    decision: text('decision')
+      .$type<'pending' | 'allow' | 'archive' | 'block' | 'spam'>()
+      .notNull(),
+    sampleThreadId: text('sample_thread_id').notNull(),
+    decidedAt: integer('decided_at', { mode: 'timestamp_ms' }),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+  },
+  (t) => [
+    unique('mail0_sender_decision_connection_email_unique').on(t.connectionId, t.email),
+    index('mail0_sender_decision_user_status_idx').on(t.userId, t.decision),
+  ],
+);
+
+export const senderScreenedThread = createTable(
+  'sender_screened_thread',
+  {
+    id: text('id').primaryKey(),
+    senderDecisionId: text('sender_decision_id')
+      .notNull()
+      .references(() => senderDecision.id, { onDelete: 'cascade' }),
+    connectionId: text('connection_id')
+      .notNull()
+      .references(() => connection.id, { onDelete: 'cascade' }),
+    threadId: text('thread_id').notNull(),
+    lastMessageId: text('last_message_id').notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+  },
+  (t) => [
+    unique('mail0_sender_screened_thread_connection_thread_unique').on(
+      t.connectionId,
+      t.threadId,
+    ),
+    index('mail0_sender_screened_thread_decision_idx').on(t.senderDecisionId),
+  ],
+);
+
+export const mailRule = createTable(
+  'mail_rule',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    connectionId: text('connection_id')
+      .notNull()
+      .references(() => connection.id, { onDelete: 'cascade' }),
+    senderEmail: text('sender_email').notNull(),
+    action: text('action').$type<'archive' | 'label' | 'important'>().notNull(),
+    labelId: text('label_id'),
+    enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+  },
+  (t) => [
+    index('mail0_mail_rule_sender_idx').on(t.connectionId, t.senderEmail, t.enabled),
+    index('mail0_mail_rule_user_idx').on(t.userId, t.enabled),
+  ],
+);
+
+export const mailRuleThread = createTable(
+  'mail_rule_thread',
+  {
+    id: text('id').primaryKey(),
+    ruleId: text('rule_id')
+      .notNull()
+      .references(() => mailRule.id, { onDelete: 'cascade' }),
+    connectionId: text('connection_id')
+      .notNull()
+      .references(() => connection.id, { onDelete: 'cascade' }),
+    threadId: text('thread_id').notNull(),
+    lastMessageId: text('last_message_id').notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+  },
+  (t) => [
+    unique('mail0_mail_rule_thread_unique').on(t.ruleId, t.connectionId, t.threadId),
+    index('mail0_mail_rule_thread_connection_idx').on(t.connectionId, t.threadId),
+  ],
+);
+
+export const mailBundle = createTable(
+  'mail_bundle',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    labelName: text('label_name').notNull(),
+    deliveryMode: text('delivery_mode').$type<'immediate' | 'scheduled'>().notNull(),
+    deliveryTimes: text('delivery_times', { mode: 'json' }).$type<string[]>().notNull(),
+    timezone: text('timezone').notNull(),
+    enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+  },
+  (t) => [
+    unique('mail0_mail_bundle_user_name_unique').on(t.userId, t.name),
+    index('mail0_mail_bundle_user_idx').on(t.userId, t.enabled),
+  ],
+);
+
+export const bundleMatcher = createTable(
+  'bundle_matcher',
+  {
+    id: text('id').primaryKey(),
+    bundleId: text('bundle_id')
+      .notNull()
+      .references(() => mailBundle.id, { onDelete: 'cascade' }),
+    connectionId: text('connection_id').references(() => connection.id, { onDelete: 'cascade' }),
+    kind: text('kind')
+      .$type<'newsletter' | 'receipt' | 'notification' | 'sender'>()
+      .notNull(),
+    value: text('value'),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+  },
+  (t) => [
+    index('mail0_bundle_matcher_bundle_idx').on(t.bundleId),
+    index('mail0_bundle_matcher_match_idx').on(t.connectionId, t.kind, t.value),
+  ],
+);
+
+export const bundleThread = createTable(
+  'bundle_thread',
+  {
+    id: text('id').primaryKey(),
+    bundleId: text('bundle_id')
+      .notNull()
+      .references(() => mailBundle.id, { onDelete: 'cascade' }),
+    connectionId: text('connection_id')
+      .notNull()
+      .references(() => connection.id, { onDelete: 'cascade' }),
+    threadId: text('thread_id').notNull(),
+    lastMessageId: text('last_message_id').notNull(),
+    queuedAt: integer('queued_at', { mode: 'timestamp_ms' }).notNull(),
+    releasedAt: integer('released_at', { mode: 'timestamp_ms' }),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+  },
+  (t) => [
+    unique('mail0_bundle_thread_unique').on(t.bundleId, t.connectionId, t.threadId),
+    index('mail0_bundle_thread_release_idx').on(t.releasedAt, t.queuedAt),
+    index('mail0_bundle_thread_connection_idx').on(t.connectionId, t.threadId),
+  ],
+);
+
+export const focusThread = createTable(
+  'focus_thread',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    connectionId: text('connection_id')
+      .notNull()
+      .references(() => connection.id, { onDelete: 'cascade' }),
+    threadId: text('thread_id').notNull(),
+    position: integer('position').notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+  },
+  (t) => [
+    unique('mail0_focus_thread_connection_thread_unique').on(t.connectionId, t.threadId),
+    index('mail0_focus_thread_user_position_idx').on(t.userId, t.position),
   ],
 );
 

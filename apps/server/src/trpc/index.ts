@@ -18,6 +18,7 @@ import type { HonoContext } from '../ctx';
 import { aiRouter } from './routes/ai';
 import { router } from './trpc';
 import { loggingRouter } from './routes/logging';
+import { mailboxWorkflowsRouter } from './routes/mailbox-workflows';
 
 export const appRouter = router({
   ai: aiRouter,
@@ -36,6 +37,7 @@ export const appRouter = router({
   templates: templatesRouter,
   meet: meetRouter,
   logging: loggingRouter,
+  mailboxWorkflows: mailboxWorkflowsRouter,
 });
 
 export type AppRouter = typeof appRouter;
