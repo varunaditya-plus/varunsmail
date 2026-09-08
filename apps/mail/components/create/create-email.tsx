@@ -87,6 +87,7 @@ export function CreateEmail({
     message: string;
     attachments: File[];
     fromEmail?: string;
+    draftId?: string;
     scheduleAt?: string;
   }) => {
     const fromEmail = data.fromEmail || aliases?.[0]?.email || userEmail;
@@ -99,7 +100,7 @@ export function CreateEmail({
       message: data.message,
       attachments: await serializeFiles(data.attachments),
       fromEmail: userName.trim() ? `${userName.replace(/[<>]/g, '')} <${fromEmail}>` : fromEmail,
-      draftId: draftId ?? undefined,
+      draftId: data.draftId ?? draftId ?? undefined,
       scheduleAt: data.scheduleAt,
     });
 

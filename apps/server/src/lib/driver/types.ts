@@ -120,9 +120,25 @@ export interface MailManager {
   getRawEmail(id: string): Promise<string>;
 }
 
+export interface ThreadListItem {
+  id: string;
+  historyId: string | null;
+  $raw?: unknown;
+  connectionId?: string;
+  key?: string;
+  receivedOn?: string;
+  account?: {
+    id: string;
+    email: string;
+    name: string | null;
+    picture: string | null;
+  };
+}
+
 export interface IGetThreadsResponse {
-  threads: { id: string; historyId: string | null; $raw?: unknown }[];
+  threads: ThreadListItem[];
   nextPageToken: string | null;
+  partialFailures?: { connectionId: string; email: string; message: string }[];
 }
 
 export const IGetThreadsResponseSchema = z.object({
@@ -131,7 +147,21 @@ export const IGetThreadsResponseSchema = z.object({
       id: z.string(),
       historyId: z.string().nullable(),
       $raw: z.unknown().optional(),
+      connectionId: z.string().optional(),
+      key: z.string().optional(),
+      receivedOn: z.string().optional(),
+      account: z
+        .object({
+          id: z.string(),
+          email: z.string(),
+          name: z.string().nullable(),
+          picture: z.string().nullable(),
+        })
+        .optional(),
     }),
   ),
   nextPageToken: z.string().nullable(),
+  partialFailures: z
+    .array(z.object({ connectionId: z.string(), email: z.string(), message: z.string() }))
+    .optional(),
 });

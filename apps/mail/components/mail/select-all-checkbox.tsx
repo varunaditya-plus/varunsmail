@@ -1,18 +1,23 @@
-import React, { useCallback, useMemo, useRef, useState, useEffect } from 'react';
+import { useCallback, useMemo, useRef, useState, useEffect } from 'react';
 import { useSearchValue } from '@/hooks/use-search-value';
 import { trpcClient } from '@/providers/query-provider';
 import { useMail } from '@/components/mail/use-mail';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useThreads } from '@/hooks/use-threads';
+import { isSharedGmailLabel, threadKey } from '@/lib/thread-ref';
+import useSearchLabels from '@/hooks/use-labels-search';
 import { useParams } from 'react-router';
 import { Check } from '../icons/icons';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { useQueryState } from 'nuqs';
 
 export default function SelectAllCheckbox({ className }: { className?: string }) {
   const [mail, setMail] = useMail();
   const [, loadedThreads] = useThreads();
   const [{ value: query }] = useSearchValue();
+  const { labels } = useSearchLabels();
+  const [accountFilter] = useQueryState('accounts');
   const { folder = 'inbox' } = useParams<{ folder: string }>() ?? {};
 
   const [isFetchingIds, setIsFetchingIds] = useState(false);
@@ -20,7 +25,10 @@ export default function SelectAllCheckbox({ className }: { className?: string })
 
   const checkboxRef = useRef<HTMLButtonElement>(null);
 
-  const loadedIds = useMemo(() => loadedThreads.map((t) => t.id), [loadedThreads]);
+  const loadedIds = useMemo(
+    () => loadedThreads.map((thread) => thread.key ?? threadKey(thread.id, thread.connectionId)),
+    [loadedThreads],
+  );
 
   const isAllLoadedSelected = useMemo(() => {
     if (loadedIds.length === 0) return false;
@@ -38,25 +46,39 @@ export default function SelectAllCheckbox({ className }: { className?: string })
 
     try {
       while (true) {
-        const page = await trpcClient.mail.listThreads.query({
-          folder,
-          q: query,
-          maxResults: MAX_PER_PAGE,
-          cursor,
-        });
+        const page =
+          folder === 'unified'
+            ? await trpcClient.mail.listUnifiedThreads.query({
+                q: query,
+                labelIds: labels.filter(isSharedGmailLabel),
+                connectionIds: accountFilter?.split(',').filter(Boolean) ?? [],
+                maxResults: MAX_PER_PAGE,
+                cursor,
+              })
+            : await trpcClient.mail.listThreads.query({
+                folder,
+                q: query,
+                labelIds: labels,
+                maxResults: MAX_PER_PAGE,
+                cursor,
+              });
         if (page?.threads?.length) {
-          ids.push(...page.threads.map((t: { id: string }) => t.id));
+          ids.push(
+            ...page.threads.map(
+              (thread) => thread.key ?? threadKey(thread.id, thread.connectionId),
+            ),
+          );
         }
         if (!page?.nextPageToken) break;
         cursor = page.nextPageToken;
       }
-    } catch (err: any) {
+    } catch (err) {
       console.error('Failed to fetch all thread IDs', err);
-      toast.error(err?.message ?? 'Failed to select all emails');
+      toast.error(err instanceof Error ? err.message : 'Failed to select all emails');
     }
 
     return ids;
-  }, [folder, query]);
+  }, [folder, query, labels, accountFilter]);
 
   const handleToggle = useCallback(() => {
     if (isFetchingIds) return;
@@ -96,7 +118,7 @@ export default function SelectAllCheckbox({ className }: { className?: string })
 
   useEffect(() => {
     allIdsCache.current = null;
-  }, [folder, query]);
+  }, [folder, query, labels, accountFilter]);
 
   return (
     <div className="flex items-center gap-2">

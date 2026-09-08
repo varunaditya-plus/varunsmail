@@ -47,6 +47,7 @@ import { connectionToDriver, getZeroSocketAgent, reSyncThread } from '../../lib/
 import { applyGmailChange, refreshGmailThread } from '../../lib/gmail-mutations';
 import { queueGmailRefresh } from '../../lib/gmail-polling';
 import { runMailboxChanges } from '../../lib/mailbox-changes';
+import { encodeThreadCursor } from '../../lib/thread-cursor';
 import { generateWhatUserCaresAbout, type UserTopic } from '../../lib/analyze/interests';
 import { DurableObjectOAuthClientProvider } from 'agents/mcp/do-oauth-client-provider';
 import { AiChatPrompt, GmailSearchAssistantSystemPrompt } from '../../lib/prompts';
@@ -1000,7 +1001,10 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
     // Create parallel Effect operations
     const ragEffect = Effect.tryPromise(() =>
       this.inboxRag(query).then((rag) => {
-        const ids = rag?.data?.map((d) => d.attributes.threadId).filter(Boolean) ?? [];
+        const ids =
+          rag?.data
+            ?.map((d) => d.attributes.threadId)
+            .filter((threadId): threadId is string => typeof threadId === 'string') ?? [];
         return ids.slice(0, maxResults);
       }),
     ).pipe(Effect.catchAll(() => Effect.succeed([])));
@@ -1022,36 +1026,45 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
         labelIds,
         maxResults,
         pageToken,
-      }).then((r) => r.threads.map((t) => t.id)),
-    ).pipe(Effect.catchAll(() => Effect.succeed([])));
+      }).then((r) => ({ threadIds: r.threads.map((t) => t.id), failed: false })),
+    ).pipe(
+      Effect.catchAll((error) => {
+        console.error(`[searchThreads] Provider search failed for ${this.name}`, error);
+        return Effect.succeed({ threadIds: [], failed: true });
+      }),
+    );
 
-    const effects: Effect.Effect<string[]>[] = [rawEffect];
-    if (this.env.AUTORAG_ID) effects.unshift(ragEffect as Effect.Effect<string[]>);
-
-    // Run both in parallel and wait for results
-    const results = await Effect.runPromise(Effect.all(effects, { concurrency: 'unbounded' }));
+    const results = await Effect.runPromise(
+      Effect.all(
+        {
+          ragIds: this.env.AUTORAG_ID ? ragEffect : Effect.succeed([]),
+          raw: rawEffect,
+        },
+        { concurrency: 'unbounded' },
+      ),
+    );
     if (this.env.AUTORAG_ID) {
-      const [ragIds, rawIds] = results;
-
       // Return InboxRag results if found, otherwise fallback to raw
-      if (ragIds.length > 0) {
+      if (results.ragIds.length > 0) {
         return {
-          threadIds: ragIds,
+          threadIds: results.ragIds,
           source: 'autorag' as const,
+          ...(results.raw.failed ? { warning: 'Provider search unavailable' } : {}),
         };
       }
 
       return {
-        threadIds: rawIds,
+        threadIds: results.raw.threadIds,
         source: 'raw' as const,
         nextPageToken: pageToken,
+        ...(results.raw.failed ? { error: 'Mailbox search unavailable' } : {}),
       };
     }
-    const [rawIds] = results;
     return {
-      threadIds: rawIds,
+      threadIds: results.raw.threadIds,
       source: 'raw' as const,
       nextPageToken: pageToken,
+      ...(results.raw.failed ? { error: 'Mailbox search unavailable' } : {}),
     };
   }
 
@@ -1201,10 +1214,13 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
             $raw: { latestReceivedOn: String(row.latest_received_on ?? '') },
           }));
 
-          // Use latest_received_on for pagination cursor
+          const last = threads[threads.length - 1];
           const nextPageToken =
-            threads.length === maxResults && result.length > 0
-              ? String(result[result.length - 1].latest_received_on)
+            threads.length === maxResults && last
+              ? encodeThreadCursor({
+                  receivedOn: String(result[result.length - 1]?.latest_received_on ?? ''),
+                  threadId: last.id,
+                })
               : null;
 
           return {

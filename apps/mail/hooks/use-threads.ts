@@ -2,6 +2,8 @@ import { backgroundQueueAtom, isThreadInBackgroundQueueAtom } from '@/store/back
 import { useInfiniteQuery, useQuery, useMutation } from '@tanstack/react-query';
 import type { IGetThreadResponse } from '../../server/src/lib/driver/types';
 import { useSearchValue } from '@/hooks/use-search-value';
+import { isSharedGmailLabel, threadKey } from '@/lib/thread-ref';
+import { useConnections } from '@/hooks/use-connections';
 import { useTRPC } from '@/providers/query-provider';
 import useSearchLabels from './use-labels-search';
 import { useSession } from '@/lib/auth-client';
@@ -19,8 +21,41 @@ export const useThreads = () => {
   const isInQueue = useAtomValue(isThreadInBackgroundQueueAtom);
   const trpc = useTRPC();
   const { labels } = useSearchLabels();
+  const [accountFilter] = useQueryState('accounts');
+  const { data: connectionsData } = useConnections();
+  const isUnifiedInbox = folder === 'unified';
+  const gmailConnectionIds = useMemo(
+    () =>
+      new Set(
+        connectionsData?.connections
+          .filter((connection) => connection.providerId === 'google')
+          .map((connection) => connection.id) ?? [],
+      ),
+    [connectionsData?.connections],
+  );
+  const connectionIds = accountFilter?.split(',').filter((id) => gmailConnectionIds.has(id)) ?? [];
+  const unifiedLabels = labels.filter(isSharedGmailLabel);
 
-  const threadsQuery = useInfiniteQuery(
+  const unifiedQuery = useInfiniteQuery(
+    trpc.mail.listUnifiedThreads.infiniteQueryOptions(
+      {
+        q: searchValue.value,
+        labelIds: unifiedLabels,
+        connectionIds,
+      },
+      {
+        enabled: isUnifiedInbox,
+        initialCursor: '',
+        getNextPageParam: (lastPage) => lastPage?.nextPageToken ?? null,
+        staleTime: 60 * 1000,
+        refetchOnMount: true,
+        refetchInterval: 60 * 1000,
+        refetchIntervalInBackground: true,
+      },
+    ),
+  );
+
+  const connectionQuery = useInfiniteQuery(
     trpc.mail.listThreads.infiniteQueryOptions(
       {
         q: searchValue.value,
@@ -28,6 +63,7 @@ export const useThreads = () => {
         labelIds: labels,
       },
       {
+        enabled: !isUnifiedInbox,
         initialCursor: '',
         getNextPageParam: (lastPage) => lastPage?.nextPageToken ?? null,
         staleTime: 60 * 1000 * 1, // 1 minute
@@ -36,17 +72,35 @@ export const useThreads = () => {
       },
     ),
   );
+  const threadsQuery = isUnifiedInbox ? unifiedQuery : connectionQuery;
 
   // Flatten threads from all pages and sort by receivedOn date (newest first)
 
   const threads = useMemo(() => {
-    return threadsQuery.data
-      ? threadsQuery.data.pages
-          .flatMap((e) => e.threads)
-          .filter(Boolean)
-          .filter((e) => !isInQueue(`thread:${e.id}`))
-      : [];
+    if (!threadsQuery.data) return [];
+
+    const seen = new Set<string>();
+    return threadsQuery.data.pages
+      .flatMap((page) => page.threads)
+      .filter(Boolean)
+      .filter((thread) => {
+        const key = thread.key ?? threadKey(thread.id, thread.connectionId);
+        if (seen.has(key) || isInQueue(`thread:${key}`)) return false;
+        seen.add(key);
+        return true;
+      });
   }, [threadsQuery.data, threadsQuery.dataUpdatedAt, isInQueue, backgroundQueue]);
+
+  const partialFailures = useMemo(
+    () =>
+      threadsQuery.data?.pages
+        .flatMap((page) => page.partialFailures ?? [])
+        .filter(
+          (failure, index, failures) =>
+            failures.findIndex((item) => item.connectionId === failure.connectionId) === index,
+        ) ?? [],
+    [threadsQuery.data],
+  );
 
   const isEmpty = useMemo(() => threads.length === 0, [threads]);
   const isReachingEnd =
@@ -59,13 +113,15 @@ export const useThreads = () => {
     await threadsQuery.fetchNextPage();
   };
 
-  return [threadsQuery, threads, isReachingEnd, loadMore] as const;
+  return [threadsQuery, threads, isReachingEnd, loadMore, partialFailures] as const;
 };
 
-export const useThread = (threadId: string | null) => {
+export const useThread = (threadId: string | null, connectionId?: string | null) => {
   const { data: session } = useSession();
   const [_threadId] = useQueryState('threadId');
+  const [_connectionId] = useQueryState('connectionId');
   const id = threadId ? threadId : _threadId;
+  const mailboxId = connectionId ?? _connectionId ?? undefined;
   const trpc = useTRPC();
   const { data: settings } = useSettings();
   const { theme: systemTheme } = useTheme();
@@ -74,6 +130,7 @@ export const useThread = (threadId: string | null) => {
     trpc.mail.get.queryOptions(
       {
         id: id!,
+        connectionId: mailboxId,
       },
       {
         enabled: !!id && !!session?.user.id,

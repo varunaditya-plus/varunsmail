@@ -15,14 +15,14 @@ import {
   LockIcon,
   Clock,
 } from '@/components/icons/icons';
-import { MessageSquareIcon } from 'lucide-react';
+import { ListFilter, ListTodo, MailCheck, Mails, MessageSquareIcon, PackageOpen } from 'lucide-react';
 import { m } from '@/paraglide/messages';
 
 export interface NavItem {
   id?: string;
   title: string;
   url: string;
-  icon: React.ComponentType<any>;
+  icon: React.ComponentType<React.SVGProps<SVGSVGElement>>;
   badge?: number;
   isBackButton?: boolean;
   isSettingsButton?: boolean;
@@ -50,6 +50,12 @@ export const navigationConfig: Record<string, NavConfig> = {
         title: 'Core',
         items: [
           {
+            id: 'unified',
+            title: 'Unified',
+            url: '/mail/unified',
+            icon: Mails,
+          },
+          {
             id: 'inbox',
             title: m['navigation.sidebar.inbox'](),
             url: '/mail/inbox',
@@ -69,6 +75,35 @@ export const navigationConfig: Record<string, NavConfig> = {
             url: '/mail/sent',
             icon: Plane2,
             shortcut: 'g + t',
+          },
+        ],
+      },
+      {
+        title: 'Workflows',
+        items: [
+          {
+            id: 'screening',
+            title: 'Screening',
+            url: '/mail/screening',
+            icon: MailCheck,
+          },
+          {
+            id: 'bundles',
+            title: 'Bundles',
+            url: '/mail/bundles',
+            icon: PackageOpen,
+          },
+          {
+            id: 'focus',
+            title: 'Focus & Reply',
+            url: '/mail/focus',
+            icon: ListTodo,
+          },
+          {
+            id: 'rules',
+            title: 'Rules',
+            url: '/mail/rules',
+            icon: ListFilter,
           },
         ],
       },

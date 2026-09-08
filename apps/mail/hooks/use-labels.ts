@@ -12,10 +12,10 @@ const desiredSystemLabels = new Set([
   'UNREAD',
 ]);
 
-export function useLabels() {
+export function useLabels(connectionId?: string) {
   const trpc = useTRPC();
   const labelQuery = useQuery(
-    trpc.labels.list.queryOptions(void 0, {
+    trpc.labels.list.queryOptions(connectionId ? { connectionId } : undefined, {
       staleTime: 1000 * 60 * 60, // 1 hour
     }),
   );
@@ -40,8 +40,8 @@ export function useLabels() {
   return { userLabels, systemLabels, ...labelQuery };
 }
 
-export function useThreadLabels(ids: string[]) {
-  const { userLabels: labels = [] } = useLabels();
+export function useThreadLabels(ids: string[], connectionId?: string) {
+  const { userLabels: labels = [] } = useLabels(connectionId);
 
   const threadLabels = useMemo(() => {
     if (!labels) return [];

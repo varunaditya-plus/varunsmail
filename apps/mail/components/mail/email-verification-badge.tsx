@@ -6,9 +6,13 @@ import React from 'react';
 
 interface EmailVerificationBadgeProps {
   messageId: string | undefined;
+  connectionId?: string;
 }
 
-export const EmailVerificationBadge: React.FC<EmailVerificationBadgeProps> = ({ messageId }) => {
+export const EmailVerificationBadge: React.FC<EmailVerificationBadgeProps> = ({
+  messageId,
+  connectionId,
+}) => {
   const trpc = useTRPC();
 
   const {
@@ -16,7 +20,7 @@ export const EmailVerificationBadge: React.FC<EmailVerificationBadgeProps> = ({ 
     isLoading,
     isError,
   } = useQuery({
-    ...trpc.mail.verifyEmail.queryOptions({ id: messageId || '' }),
+    ...trpc.mail.verifyEmail.queryOptions({ id: messageId || '', connectionId }),
     enabled: !!messageId,
     staleTime: 5 * 60 * 1000,
     retry: 1,

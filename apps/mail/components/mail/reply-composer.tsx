@@ -1,6 +1,6 @@
 import { useUndoSend } from '@/hooks/use-undo-send';
 import { constructReplyBody, constructForwardBody } from '@/lib/utils';
-import { useActiveConnection } from '@/hooks/use-connections';
+import { useActiveConnection, useConnections } from '@/hooks/use-connections';
 import { useEmailAliases } from '@/hooks/use-email-aliases';
 import { EmailComposer } from '../create/email-composer';
 import { useHotkeysContext } from 'react-hotkeys-hook';
@@ -25,16 +25,21 @@ interface ReplyComposeProps {
 export default function ReplyCompose({ messageId }: ReplyComposeProps) {
   const [mode, setMode] = useQueryState('mode');
   const { enableScope, disableScope } = useHotkeysContext();
-  const { data: aliases } = useEmailAliases();
+  const [connectionId] = useQueryState('connectionId');
+  const { data: aliases } = useEmailAliases(connectionId);
 
   const [draftId, setDraftId] = useQueryState('draftId');
   const [threadId] = useQueryState('threadId');
   const [, setActiveReplyId] = useQueryState('activeReplyId');
-  const { data: emailData, refetch, latestDraft } = useThread(threadId);
-  const { data: draft } = useDraft(draftId ?? null);
+  const { data: emailData, refetch, latestDraft } = useThread(threadId, connectionId);
+  const { data: draft } = useDraft(draftId ?? null, connectionId);
   const trpc = useTRPC();
   const { mutateAsync: sendEmail } = useMutation(trpc.mail.send.mutationOptions());
   const { data: activeConnection } = useActiveConnection();
+  const { data: connectionData } = useConnections();
+  const replyConnection =
+    connectionData?.connections.find((connection) => connection.id === connectionId) ??
+    activeConnection;
   const { data: settings, isLoading: settingsLoading } = useSettings();
   const { data: session } = useSession();
   const { handleUndoSend } = useUndoSend();
@@ -45,9 +50,9 @@ export default function ReplyCompose({ messageId }: ReplyComposeProps) {
 
   // Initialize recipients and subject when mode changes
   useEffect(() => {
-    if (!replyToMessage || !mode || !activeConnection?.email) return;
+    if (!replyToMessage || !mode || !replyConnection?.email) return;
 
-    const userEmail = activeConnection.email.toLowerCase();
+    const userEmail = replyConnection.email.toLowerCase();
     const senderEmail = replyToMessage.sender.email.toLowerCase();
 
     // Set subject based on mode
@@ -96,7 +101,7 @@ export default function ReplyCompose({ messageId }: ReplyComposeProps) {
       // For forward, we start with empty recipients
       // Just set the subject and include the original message
     }
-  }, [mode, replyToMessage, activeConnection?.email]);
+  }, [mode, replyToMessage, replyConnection?.email]);
 
   const handleSendEmail = async (data: {
     to: string[];
@@ -105,17 +110,25 @@ export default function ReplyCompose({ messageId }: ReplyComposeProps) {
     subject: string;
     message: string;
     attachments: File[];
+    fromEmail?: string;
+    draftId?: string;
     scheduleAt?: string;
   }) => {
-    if (!replyToMessage || !activeConnection?.email) return;
+    if (!replyToMessage || !replyConnection?.email) return;
 
     try {
-      const userEmail = activeConnection.email.toLowerCase();
-      const userName = activeConnection.name || session?.user?.name || '';
+      const userEmail = replyConnection.email.toLowerCase();
+      const userName = replyConnection.name || session?.user?.name || '';
 
-      let fromEmail = userEmail;
+      let senderAddress = userEmail;
+      const selectedAddress = data.fromEmail?.trim().toLowerCase();
+      const selectedAlias = aliases?.find(
+        (alias) => alias.email.toLowerCase() === selectedAddress,
+      );
 
-      if (aliases && aliases.length > 0 && replyToMessage) {
+      if (selectedAlias || selectedAddress === userEmail) {
+        senderAddress = selectedAlias?.email ?? replyConnection.email;
+      } else if (aliases && aliases.length > 0) {
         const allRecipients = [
           ...(replyToMessage.to || []),
           ...(replyToMessage.cc || []),
@@ -128,20 +141,19 @@ export default function ReplyCompose({ messageId }: ReplyComposeProps) {
         );
 
         if (matchingAlias) {
-          fromEmail = userName.trim()
-            ? `${userName.replace(/[<>]/g, '')} <${matchingAlias.email}>`
-            : matchingAlias.email;
+          senderAddress = matchingAlias.email;
         } else {
-          const primaryEmail =
+          senderAddress =
             aliases.find((alias) => alias.email.toLowerCase() === userEmail)?.email ||
             aliases.find((alias) => alias.primary)?.email ||
             aliases[0]?.email ||
             userEmail;
-          fromEmail = userName.trim()
-            ? `${userName.replace(/[<>]/g, '')} <${primaryEmail}>`
-            : primaryEmail;
         }
       }
+      const senderName = selectedAlias?.name || userName;
+      const fromEmail = senderName.trim()
+        ? `${senderName.replace(/[<>]/g, '')} <${senderAddress}>`
+        : senderAddress;
 
       const toRecipients: Sender[] = data.to.map((email) => ({
         email,
@@ -187,7 +199,7 @@ export default function ReplyCompose({ messageId }: ReplyComposeProps) {
         message: emailBody,
         attachments: await serializeFiles(data.attachments),
         fromEmail: fromEmail,
-        draftId: draftId ?? undefined,
+        draftId: data.draftId ?? draftId ?? undefined,
         headers: {
           'In-Reply-To': replyToMessage?.messageId ?? '',
           References: [
@@ -202,6 +214,7 @@ export default function ReplyCompose({ messageId }: ReplyComposeProps) {
         isForward: mode === 'forward',
         originalMessage: replyToMessage.decodedBody,
         scheduleAt: data.scheduleAt,
+        connectionId: replyConnection.id,
       });
 
       posthog.capture('Reply Email Sent');
@@ -256,6 +269,7 @@ export default function ReplyCompose({ messageId }: ReplyComposeProps) {
   return (
     <div className="w-full rounded-2xl overflow-visible border">
       <EmailComposer
+        connectionId={replyConnection?.id}
         editorClassName="min-h-[50px]"
         className="w-full max-w-none! pb-1 overflow-visible"
         onSendEmail={handleSendEmail}

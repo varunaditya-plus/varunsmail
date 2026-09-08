@@ -1,15 +1,34 @@
 import { useLoaderData, useNavigate } from 'react-router';
 
 import { MailLayout } from '@/components/mail/mail';
+import { FocusReply } from '@/components/mail/focus-reply';
+import { MailBundles } from '@/components/mail/mail-bundles';
+import { MailRules } from '@/components/mail/mail-rules';
+import { SenderScreening } from '@/components/mail/sender-screening';
 import { useLabels } from '@/hooks/use-labels';
 import { authProxy } from '@/lib/auth-proxy';
 import { useEffect, useState } from 'react';
 import type { Route } from './+types/page';
 
-const ALLOWED_FOLDERS = new Set(['inbox', 'draft', 'sent', 'spam', 'bin', 'archive', 'snoozed']);
+const ALLOWED_FOLDERS = new Set([
+  'unified',
+  'inbox',
+  'draft',
+  'sent',
+  'spam',
+  'bin',
+  'archive',
+  'snoozed',
+  'screening',
+  'bundles',
+  'focus',
+  'rules',
+]);
+
+type LabelNode = { id?: string; labels?: LabelNode[] };
 
 export async function clientLoader({ params, request }: Route.ClientLoaderArgs) {
-  if (!params.folder) return Response.redirect(`${import.meta.env.VITE_PUBLIC_APP_URL}/mail/inbox`);
+  if (!params.folder) return Response.redirect(`${import.meta.env.VITE_PUBLIC_APP_URL}/mail/unified`);
 
   const session = await authProxy.api.getSession({ headers: request.headers });
   if (!session) return Response.redirect(`${import.meta.env.VITE_PUBLIC_APP_URL}/login`);
@@ -37,7 +56,7 @@ export default function MailPage() {
     if (isLoadingLabels) return;
 
     if (userLabels) {
-      const checkLabelExists = (labels: any[]): boolean => {
+      const checkLabelExists = (labels: LabelNode[]): boolean => {
         for (const label of labels) {
           if (label.id === folder) return true;
           if (label.labels && label.labels.length > 0) {
@@ -66,11 +85,15 @@ export default function MailPage() {
       <div className="flex h-screen w-full flex-col items-center justify-center">
         <h2 className="text-xl font-semibold">Folder not found</h2>
         <p className="text-muted-foreground mt-2">
-          The folder you're looking for doesn't exist. Redirecting to inbox...
+          The folder you&apos;re looking for doesn&apos;t exist. Redirecting to inbox...
         </p>
       </div>
     );
   }
 
+  if (folder === 'screening') return <SenderScreening />;
+  if (folder === 'bundles') return <MailBundles />;
+  if (folder === 'focus') return <FocusReply />;
+  if (folder === 'rules') return <MailRules />;
   return <MailLayout />;
 }

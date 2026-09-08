@@ -5,6 +5,8 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { backgroundQueueAtom } from '@/store/backgroundQueue';
 import type { ThreadDestination } from '@/lib/thread-actions';
 import { useTRPC } from '@/providers/query-provider';
+import { useActiveConnection } from '@/hooks/use-connections';
+import { groupThreadKeys, threadKey } from '@/lib/thread-ref';
 import { useMail } from '@/components/mail/use-mail';
 import { moveThreadsTo } from '@/lib/thread-actions';
 import { m } from '@/paraglide/messages';
@@ -56,8 +58,10 @@ export function useOptimisticActions() {
   const [, addOptimisticAction] = useAtom(addOptimisticActionAtom);
   const [, removeOptimisticAction] = useAtom(removeOptimisticActionAtom);
   const [threadId, setThreadId] = useQueryState('threadId');
+  const [connectionId, setConnectionId] = useQueryState('connectionId');
   const [, setActiveReplyId] = useQueryState('activeReplyId');
   const [mail, setMail] = useMail();
+  const { data: activeConnection } = useActiveConnection();
   const { mutateAsync: markAsRead } = useMutation(trpc.mail.markAsRead.mutationOptions());
   const { mutateAsync: markAsUnread } = useMutation(trpc.mail.markAsUnread.mutationOptions());
 
@@ -89,7 +93,7 @@ export function useOptimisticActions() {
   }: {
     type: keyof typeof ActionType;
     threadIds: string[];
-    params: PendingAction['params'];
+    params: ActionParams;
     optimisticId: string;
     execute: () => Promise<void>;
     undo: () => void;
@@ -199,7 +203,11 @@ export function useOptimisticActions() {
         params: { read: true },
         optimisticId,
         execute: async () => {
-          await markAsRead({ ids: threadIds });
+          await Promise.all(
+            [...groupThreadKeys(threadIds, activeConnection?.id)].map(
+              ([connectionId, ids]) => markAsRead({ ids, connectionId }),
+            ),
+          );
 
           if (mail.bulkSelected.length > 0) {
             setMail((prev) => ({ ...prev, bulkSelected: [] }));
@@ -211,7 +219,13 @@ export function useOptimisticActions() {
         toastMessage: silent ? '' : 'Marked as read',
       });
     },
-    [queryClient, addOptimisticAction, removeOptimisticAction, markAsRead, setMail],
+    [
+      activeConnection?.id,
+      addOptimisticAction,
+      removeOptimisticAction,
+      markAsRead,
+      setMail,
+    ],
   );
 
   function optimisticMarkAsUnread(threadIds: string[]) {
@@ -229,7 +243,11 @@ export function useOptimisticActions() {
       params: { read: false },
       optimisticId,
       execute: async () => {
-        await markAsUnread({ ids: threadIds });
+        await Promise.all(
+          [...groupThreadKeys(threadIds, activeConnection?.id)].map(([connectionId, ids]) =>
+            markAsUnread({ ids, connectionId }),
+          ),
+        );
 
         if (mail.bulkSelected.length > 0) {
           setMail({ ...mail, bulkSelected: [] });
@@ -258,7 +276,11 @@ export function useOptimisticActions() {
         params: { starred },
         optimisticId,
         execute: async () => {
-          await toggleStar({ ids: threadIds });
+          await Promise.all(
+            [...groupThreadKeys(threadIds, activeConnection?.id)].map(([connectionId, ids]) =>
+              toggleStar({ ids, connectionId }),
+            ),
+          );
         },
         undo: () => {
           removeOptimisticAction(optimisticId);
@@ -268,7 +290,7 @@ export function useOptimisticActions() {
           : m['common.actions.removedFromFavorites'](),
       });
     },
-    [queryClient, addOptimisticAction, removeOptimisticAction, toggleStar, setMail],
+    [activeConnection?.id, addOptimisticAction, removeOptimisticAction, toggleStar],
   );
 
   function optimisticMoveThreadsTo(
@@ -290,8 +312,12 @@ export function useOptimisticActions() {
       setBackgroundQueue({ type: 'add', threadId: `thread:${id}` });
     });
 
-    if (threadId && threadIds.includes(threadId)) {
+    if (
+      threadId &&
+      threadIds.includes(threadKey(threadId, connectionId ?? activeConnection?.id))
+    ) {
       setThreadId(null);
+      setConnectionId(null);
       setActiveReplyId(null);
     }
     const successMessage =
@@ -313,6 +339,7 @@ export function useOptimisticActions() {
           threadIds,
           currentFolder,
           destination,
+          connectionId: activeConnection?.id,
         });
 
         if (mail.bulkSelected.length > 0) {
@@ -349,8 +376,12 @@ export function useOptimisticActions() {
       setBackgroundQueue({ type: 'add', threadId: `thread:${id}` });
     });
 
-    if (threadId && threadIds.includes(threadId)) {
+    if (
+      threadId &&
+      threadIds.includes(threadKey(threadId, connectionId ?? activeConnection?.id))
+    ) {
       setThreadId(null);
+      setConnectionId(null);
       setActiveReplyId(null);
     }
     createPendingAction({
@@ -359,7 +390,11 @@ export function useOptimisticActions() {
       params: { currentFolder, destination: 'bin' },
       optimisticId,
       execute: async () => {
-        await bulkDeleteThread({ ids: threadIds });
+        await Promise.all(
+          [...groupThreadKeys(threadIds, activeConnection?.id)].map(([connectionId, ids]) =>
+            bulkDeleteThread({ ids, connectionId }),
+          ),
+        );
 
         if (mail.bulkSelected.length > 0) {
           setMail({ ...mail, bulkSelected: [] });
@@ -396,7 +431,11 @@ export function useOptimisticActions() {
         params: { important: isImportant },
         optimisticId,
         execute: async () => {
-          await toggleImportant({ ids: threadIds });
+          await Promise.all(
+            [...groupThreadKeys(threadIds, activeConnection?.id)].map(([connectionId, ids]) =>
+              toggleImportant({ ids, connectionId }),
+            ),
+          );
 
           if (mail.bulkSelected.length > 0) {
             setMail((prev) => ({ ...prev, bulkSelected: [] }));
@@ -408,11 +447,16 @@ export function useOptimisticActions() {
         toastMessage: isImportant ? 'Marked as important' : 'Unmarked as important',
       });
     },
-    [queryClient, addOptimisticAction, removeOptimisticAction, toggleImportant, setMail],
+    [activeConnection?.id, addOptimisticAction, removeOptimisticAction, toggleImportant, setMail],
   );
 
   function optimisticToggleLabel(threadIds: string[], labelId: string, add: boolean) {
     if (!threadIds.length || !labelId) return;
+    const groups = groupThreadKeys(threadIds, activeConnection?.id);
+    if (groups.size > 1) {
+      toast.error('Labels can only be changed for one account at a time.');
+      return;
+    }
 
     const optimisticId = addOptimisticAction({
       type: 'LABEL',
@@ -427,8 +471,10 @@ export function useOptimisticActions() {
       params: { labelId, add },
       optimisticId,
       execute: async () => {
+        const [connectionId, ids] = groups.entries().next().value!;
         await modifyLabels({
-          threadId: threadIds,
+          threadId: ids,
+          connectionId,
           addLabels: add ? [labelId] : [],
           removeLabels: add ? [] : [labelId],
         });
@@ -461,7 +507,11 @@ export function useOptimisticActions() {
       params: { currentFolder, wakeAt: wakeAt.toISOString() },
       optimisticId,
       execute: async () => {
-        await snoozeThreads({ ids: threadIds, wakeAt: wakeAt.toISOString() });
+        await Promise.all(
+          [...groupThreadKeys(threadIds, activeConnection?.id)].map(([connectionId, ids]) =>
+            snoozeThreads({ ids, connectionId, wakeAt: wakeAt.toISOString() }),
+          ),
+        );
 
         if (mail.bulkSelected.length > 0) {
           setMail({ ...mail, bulkSelected: [] });
@@ -489,7 +539,11 @@ export function useOptimisticActions() {
       params: { currentFolder } as any,
       optimisticId,
       execute: async () => {
-        await unsnoozeThreads({ ids: threadIds });
+        await Promise.all(
+          [...groupThreadKeys(threadIds, activeConnection?.id)].map(([connectionId, ids]) =>
+            unsnoozeThreads({ ids, connectionId }),
+          ),
+        );
       },
       undo: () => {
         removeOptimisticAction(optimisticId);

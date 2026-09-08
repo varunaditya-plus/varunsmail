@@ -18,6 +18,11 @@ import { activeDriverProcedure, router, privateProcedure } from '../trpc';
 import { processEmailHtml } from '../../lib/email-processor';
 import { listMailboxThreads } from '../../lib/mailbox-list';
 import { runMailboxChanges } from '../../lib/mailbox-changes';
+import {
+  decodeUnifiedInboxCursor,
+  mergeUnifiedInboxPages,
+  type UnifiedInboxPage,
+} from '../../lib/unified-inbox';
 import { defaultPageSize, FOLDERS } from '../../lib/utils';
 import { toAttachmentFiles } from '../../lib/attachments';
 import { serializedFileSchema } from '../../lib/schemas';
@@ -31,6 +36,28 @@ const senderSchema = z.object({
   name: z.string().optional(),
   email: z.string(),
 });
+
+const threadIdsSchema = z.object({
+  ids: z.string().array(),
+  connectionId: z.string().optional(),
+});
+
+async function getOwnedConnection(userId: string, connectionId?: string) {
+  const db = await getZeroDB(userId);
+  if (connectionId) {
+    const mailbox = await db.findUserConnection(connectionId);
+    if (!mailbox) throw new TRPCError({ code: 'NOT_FOUND', message: 'Mailbox not found' });
+    return mailbox;
+  }
+
+  const user = await db.findUser();
+  const mailbox =
+    (user?.defaultConnectionId
+      ? await db.findUserConnection(user.defaultConnectionId)
+      : undefined) ?? (await db.findFirstConnection());
+  if (!mailbox) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Connect a mailbox first' });
+  return mailbox;
+}
 
 // const getFolderLabelId = (folder: string) => {
 //   // Handle special cases first
@@ -64,17 +91,93 @@ export const mailRouter = router({
     await runner.pollMailbox(activeConnection.id);
     return runner.importInbox(activeConnection.id);
   }),
-  get: activeDriverProcedure
+  get: privateProcedure
     .input(
       z.object({
         id: z.string(),
+        connectionId: z.string().optional(),
       }),
     )
     .output(IGetThreadResponseSchema)
     .query(async ({ input, ctx }) => {
-      const { activeConnection } = ctx;
-      const result = await getThread(activeConnection.id, input.id);
-      return result.result;
+      const mailbox = await getOwnedConnection(ctx.sessionUser.id, input.connectionId);
+      const result = (await getThread(mailbox.id, input.id)).result;
+      return {
+        ...result,
+        messages: result.messages.map((message) => ({ ...message, connectionId: mailbox.id })),
+        latest: result.latest ? { ...result.latest, connectionId: mailbox.id } : undefined,
+      };
+    }),
+  listUnifiedThreads: privateProcedure
+    .input(
+      z.object({
+        q: z.string().optional().default(''),
+        maxResults: z.number().int().min(1).max(500).optional().default(defaultPageSize),
+        cursor: z.string().optional().default(''),
+        labelIds: z.array(z.string()).optional().default([]),
+        connectionIds: z.array(z.string()).optional().default([]),
+      }),
+    )
+    .output(IGetThreadsResponseSchema)
+    .query(async ({ ctx, input }) => {
+      const db = await getZeroDB(ctx.sessionUser.id);
+      const owned = (await db.findManyConnections())
+        .filter((mailbox) => mailbox.providerId === 'google')
+        .sort((a, b) => a.id.localeCompare(b.id));
+      const ownedIds = new Set(owned.map((mailbox) => mailbox.id));
+
+      if (input.connectionIds.some((connectionId) => !ownedIds.has(connectionId))) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Mailbox filter is not owned' });
+      }
+
+      let cursor: Record<string, string>;
+      try {
+        cursor = decodeUnifiedInboxCursor(input.cursor);
+      } catch {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Invalid inbox cursor' });
+      }
+
+      const selected = input.connectionIds.length
+        ? owned.filter((mailbox) => input.connectionIds.includes(mailbox.id))
+        : owned;
+      const results = await Promise.allSettled(
+        selected.map(async (mailbox) => ({
+          connection: {
+            id: mailbox.id,
+            email: mailbox.email,
+            name: mailbox.name,
+            picture: mailbox.picture,
+          },
+          page: await getThreadsFromDB(mailbox.id, {
+            folder: FOLDERS.INBOX,
+            q: input.q,
+            labelIds: input.labelIds,
+            maxResults: Math.min(500, input.maxResults + 1),
+            pageToken: cursor[mailbox.id] ?? '',
+          }),
+        })),
+      );
+      const pages: UnifiedInboxPage[] = [];
+      const partialFailures: { connectionId: string; email: string; message: string }[] = [];
+
+      results.forEach((result, index) => {
+        const mailbox = selected[index]!;
+        if (result.status === 'fulfilled') {
+          pages.push(result.value);
+        } else {
+          console.error('[listUnifiedThreads] Mailbox failed', mailbox.id, result.reason);
+          partialFailures.push({
+            connectionId: mailbox.id,
+            email: mailbox.email,
+            message: 'This mailbox could not be loaded.',
+          });
+        }
+      });
+
+      return {
+        ...mergeUnifiedInboxPages(pages, cursor, input.maxResults),
+        partialFailures,
+      };
     }),
   listThreads: activeDriverProcedure
     .input(
@@ -159,61 +262,50 @@ export const mailRouter = router({
       console.debug('[listThreads] Returning threadsResponse:', threadsResponse);
       return threadsResponse;
     }),
-  markAsRead: activeDriverProcedure
-    .input(
-      z.object({
-        ids: z.string().array(),
-      }),
-    )
+  markAsRead: privateProcedure
+    .input(threadIdsSchema)
     .mutation(async ({ input, ctx }) => {
-      const { activeConnection } = ctx;
+      const mailbox = await getOwnedConnection(ctx.sessionUser.id, input.connectionId);
       return runMailboxChanges(
         input.ids.map((threadId) => () =>
-          modifyThreadLabelsInDB(activeConnection.id, threadId, [], ['UNREAD']),
+          modifyThreadLabelsInDB(mailbox.id, threadId, [], ['UNREAD']),
         ),
       );
     }),
-  markAsUnread: activeDriverProcedure
-    .input(
-      z.object({
-        ids: z.string().array(),
-      }),
-    )
+  markAsUnread: privateProcedure
+    .input(threadIdsSchema)
     // TODO: Add batching
     .mutation(async ({ input, ctx }) => {
-      const { activeConnection } = ctx;
+      const mailbox = await getOwnedConnection(ctx.sessionUser.id, input.connectionId);
       return runMailboxChanges(
         input.ids.map((threadId) => () =>
-          modifyThreadLabelsInDB(activeConnection.id, threadId, ['UNREAD'], []),
+          modifyThreadLabelsInDB(mailbox.id, threadId, ['UNREAD'], []),
         ),
       );
     }),
-  markAsImportant: activeDriverProcedure
-    .input(
-      z.object({
-        ids: z.string().array(),
-      }),
-    )
+  markAsImportant: privateProcedure
+    .input(threadIdsSchema)
     .mutation(async ({ input, ctx }) => {
-      const { activeConnection } = ctx;
+      const mailbox = await getOwnedConnection(ctx.sessionUser.id, input.connectionId);
       return runMailboxChanges(
         input.ids.map((threadId) => () =>
-          modifyThreadLabelsInDB(activeConnection.id, threadId, ['IMPORTANT'], []),
+          modifyThreadLabelsInDB(mailbox.id, threadId, ['IMPORTANT'], []),
         ),
       );
     }),
-  modifyLabels: activeDriverProcedure
+  modifyLabels: privateProcedure
     .input(
       z.object({
         threadId: z.string().array(),
         addLabels: z.string().array().optional().default([]),
         removeLabels: z.string().array().optional().default([]),
+        connectionId: z.string().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const { activeConnection } = ctx;
+      const mailbox = await getOwnedConnection(ctx.sessionUser.id, input.connectionId);
       const executionCtx = getContext<HonoContext>().executionCtx;
-      const { stub: agent } = await getZeroAgent(activeConnection.id, executionCtx);
+      const { stub: agent } = await getZeroAgent(mailbox.id, executionCtx);
       const { threadId, addLabels, removeLabels } = input;
 
       console.log(`Server: updateThreadLabels called for thread ${threadId}`);
@@ -226,7 +318,7 @@ export const mailRouter = router({
       if (threadIds.length) {
         await runMailboxChanges(
           threadIds.map((threadId) => () =>
-            modifyThreadLabelsInDB(activeConnection.id, threadId, addLabels, removeLabels),
+            modifyThreadLabelsInDB(mailbox.id, threadId, addLabels, removeLabels),
           ),
         );
         return { success: true };
@@ -236,16 +328,12 @@ export const mailRouter = router({
       return { success: false, error: 'No label changes specified' };
     }),
 
-  toggleStar: activeDriverProcedure
-    .input(
-      z.object({
-        ids: z.string().array(),
-      }),
-    )
+  toggleStar: privateProcedure
+    .input(threadIdsSchema)
     .mutation(async ({ input, ctx }) => {
-      const { activeConnection } = ctx;
+      const mailbox = await getOwnedConnection(ctx.sessionUser.id, input.connectionId);
       const executionCtx = getContext<HonoContext>().executionCtx;
-      const { stub: agent } = await getZeroAgent(activeConnection.id, executionCtx);
+      const { stub: agent } = await getZeroAgent(mailbox.id, executionCtx);
       const { threadIds } = await agent.normalizeIds(input.ids);
 
       if (!threadIds.length) {
@@ -254,7 +342,7 @@ export const mailRouter = router({
 
       const threadResults = await Promise.allSettled(
         threadIds.map(async (id: string) => {
-          const thread = await getThread(activeConnection.id, id);
+          const thread = await getThread(mailbox.id, id);
           return thread.result;
         }),
       );
@@ -280,7 +368,7 @@ export const mailRouter = router({
       await runMailboxChanges(
         threadIds.map((threadId) => () =>
           modifyThreadLabelsInDB(
-            activeConnection.id,
+            mailbox.id,
             threadId,
             shouldStar ? ['STARRED'] : [],
             shouldStar ? [] : ['STARRED'],
@@ -290,16 +378,12 @@ export const mailRouter = router({
 
       return { success: true };
     }),
-  toggleImportant: activeDriverProcedure
-    .input(
-      z.object({
-        ids: z.string().array(),
-      }),
-    )
+  toggleImportant: privateProcedure
+    .input(threadIdsSchema)
     .mutation(async ({ input, ctx }) => {
-      const { activeConnection } = ctx;
+      const mailbox = await getOwnedConnection(ctx.sessionUser.id, input.connectionId);
       const executionCtx = getContext<HonoContext>().executionCtx;
-      const { stub: agent } = await getZeroAgent(activeConnection.id, executionCtx);
+      const { stub: agent } = await getZeroAgent(mailbox.id, executionCtx);
       const { threadIds } = await agent.normalizeIds(input.ids);
 
       if (!threadIds.length) {
@@ -308,7 +392,7 @@ export const mailRouter = router({
 
       const threadResults = await Promise.allSettled(
         threadIds.map(async (id: string) => {
-          const thread = await getThread(activeConnection.id, id);
+          const thread = await getThread(mailbox.id, id);
           return thread.result;
         }),
       );
@@ -334,7 +418,7 @@ export const mailRouter = router({
       await runMailboxChanges(
         threadIds.map((threadId) => () =>
           modifyThreadLabelsInDB(
-            activeConnection.id,
+            mailbox.id,
             threadId,
             shouldMarkImportant ? ['IMPORTANT'] : [],
             shouldMarkImportant ? [] : ['IMPORTANT'],
@@ -344,45 +428,33 @@ export const mailRouter = router({
 
       return { success: true };
     }),
-  bulkStar: activeDriverProcedure
-    .input(
-      z.object({
-        ids: z.string().array(),
-      }),
-    )
+  bulkStar: privateProcedure
+    .input(threadIdsSchema)
     .mutation(async ({ input, ctx }) => {
-      const { activeConnection } = ctx;
+      const mailbox = await getOwnedConnection(ctx.sessionUser.id, input.connectionId);
       return runMailboxChanges(
         input.ids.map((threadId) => () =>
-          modifyThreadLabelsInDB(activeConnection.id, threadId, ['STARRED'], []),
+          modifyThreadLabelsInDB(mailbox.id, threadId, ['STARRED'], []),
         ),
       );
     }),
-  bulkMarkImportant: activeDriverProcedure
-    .input(
-      z.object({
-        ids: z.string().array(),
-      }),
-    )
+  bulkMarkImportant: privateProcedure
+    .input(threadIdsSchema)
     .mutation(async ({ input, ctx }) => {
-      const { activeConnection } = ctx;
+      const mailbox = await getOwnedConnection(ctx.sessionUser.id, input.connectionId);
       return runMailboxChanges(
         input.ids.map((threadId) => () =>
-          modifyThreadLabelsInDB(activeConnection.id, threadId, ['IMPORTANT'], []),
+          modifyThreadLabelsInDB(mailbox.id, threadId, ['IMPORTANT'], []),
         ),
       );
     }),
-  bulkUnstar: activeDriverProcedure
-    .input(
-      z.object({
-        ids: z.string().array(),
-      }),
-    )
+  bulkUnstar: privateProcedure
+    .input(threadIdsSchema)
     .mutation(async ({ input, ctx }) => {
-      const { activeConnection } = ctx;
+      const mailbox = await getOwnedConnection(ctx.sessionUser.id, input.connectionId);
       return runMailboxChanges(
         input.ids.map((threadId) => () =>
-          modifyThreadLabelsInDB(activeConnection.id, threadId, [], ['STARRED']),
+          modifyThreadLabelsInDB(mailbox.id, threadId, [], ['STARRED']),
         ),
       );
     }),
@@ -405,22 +477,18 @@ export const mailRouter = router({
       };
     }
   }),
-  bulkUnmarkImportant: activeDriverProcedure
-    .input(
-      z.object({
-        ids: z.string().array(),
-      }),
-    )
+  bulkUnmarkImportant: privateProcedure
+    .input(threadIdsSchema)
     .mutation(async ({ input, ctx }) => {
-      const { activeConnection } = ctx;
+      const mailbox = await getOwnedConnection(ctx.sessionUser.id, input.connectionId);
       return runMailboxChanges(
         input.ids.map((threadId) => () =>
-          modifyThreadLabelsInDB(activeConnection.id, threadId, [], ['IMPORTANT']),
+          modifyThreadLabelsInDB(mailbox.id, threadId, [], ['IMPORTANT']),
         ),
       );
     }),
 
-  send: activeDriverProcedure
+  send: privateProcedure
     .input(
       z.object({
         to: z.array(senderSchema),
@@ -436,16 +504,15 @@ export const mailRouter = router({
         isForward: z.boolean().optional(),
         originalMessage: z.string().optional(),
         scheduleAt: z.string().optional(),
+        connectionId: z.string().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const { activeConnection, sessionUser } = ctx;
+      const { sessionUser } = ctx;
+      const { draftId, scheduleAt, attachments, connectionId, ...mail } = input;
+      const mailbox = await getOwnedConnection(sessionUser.id, connectionId);
       const executionCtx = getContext<HonoContext>().executionCtx;
-      const agent = await getZeroAgent(activeConnection.id, executionCtx);
-
-      const { draftId, scheduleAt, attachments, ...mail } = input as typeof input & {
-        scheduleAt?: string;
-      };
+      const agent = await getZeroAgent(mailbox.id, executionCtx);
 
       const db = await getZeroDB(sessionUser.id);
       const userSettings = await db.findUserSettings();
@@ -455,7 +522,7 @@ export const mailRouter = router({
       const afterTask = async () => {
         try {
           console.warn('Saving writing style matrix...');
-          await updateWritingStyleMatrix(activeConnection.id, input.message);
+          await updateWritingStyleMatrix(mailbox.id, input.message);
           console.warn('Saved writing style matrix.');
         } catch (error) {
           console.error('Failed to save writing style matrix', error);
@@ -509,7 +576,7 @@ export const mailRouter = router({
           ...mail,
           draftId,
           attachments,
-          connectionId: activeConnection.id,
+          connectionId: mailbox.id,
         };
 
         try {
@@ -527,7 +594,7 @@ export const mailRouter = router({
               messageId,
               JSON.stringify({
                 messageId,
-                connectionId: activeConnection.id,
+                connectionId: mailbox.id,
                 sendAt: targetTime,
               }),
               { expirationTtl: Math.min(Math.ceil(rawDelaySeconds + 3600), 31556952) },
@@ -543,7 +610,7 @@ export const mailRouter = router({
           const delaySeconds = rawDelaySeconds;
           const queueBody: IEmailSendBatch = {
             messageId,
-            connectionId: activeConnection.id,
+            connectionId: mailbox.id,
             sendAt: targetTime,
           };
           try {
@@ -581,7 +648,7 @@ export const mailRouter = router({
       ctx.c.executionCtx.waitUntil(afterTask());
       return { success: true };
     }),
-  unsend: activeDriverProcedure
+  unsend: privateProcedure
     .input(
       z.object({
         messageId: z.string(),
@@ -589,7 +656,7 @@ export const mailRouter = router({
     )
     .mutation(async ({ input, ctx }) => {
       const { messageId } = input;
-      const { activeConnection } = ctx;
+      const db = await getZeroDB(ctx.sessionUser.id);
       const {
         pending_emails_status: statusKV,
         pending_emails_payload: payloadKV,
@@ -600,10 +667,10 @@ export const mailRouter = router({
       if (scheduledData) {
         try {
           const { connectionId } = JSON.parse(scheduledData);
-          if (connectionId !== activeConnection.id) {
+          if (!connectionId || !(await db.findUserConnection(connectionId))) {
             return {
               success: false,
-              error: "Unauthorized: Cannot cancel another user's scheduled email",
+              error: 'Unauthorized scheduled email',
             } as const;
           }
         } catch (error) {
@@ -616,10 +683,10 @@ export const mailRouter = router({
       if (payloadData) {
         try {
           const payload = JSON.parse(payloadData);
-          if (payload.connectionId && payload.connectionId !== activeConnection.id) {
+          if (payload.connectionId && !(await db.findUserConnection(payload.connectionId))) {
             return {
               success: false,
-              error: "Unauthorized: Cannot cancel another user's queued email",
+              error: 'Unauthorized queued email',
             } as const;
           }
         } catch (error) {
@@ -637,44 +704,37 @@ export const mailRouter = router({
 
       return { success: true };
     }),
-  delete: activeDriverProcedure
+  delete: privateProcedure
     .input(
       z.object({
         id: z.string(),
+        connectionId: z.string().optional(),
       }),
     )
     .mutation(async ({ input, ctx }) => {
-      const { activeConnection } = ctx;
+      const mailbox = await getOwnedConnection(ctx.sessionUser.id, input.connectionId);
       const executionCtx = getContext<HonoContext>().executionCtx;
-      const { stub } = await getZeroAgent(activeConnection.id, executionCtx);
+      const { stub } = await getZeroAgent(mailbox.id, executionCtx);
       await stub.delete(input.id);
       return true;
     }),
-  bulkDelete: activeDriverProcedure
-    .input(
-      z.object({
-        ids: z.string().array(),
-      }),
-    )
+  bulkDelete: privateProcedure
+    .input(threadIdsSchema)
     .mutation(async ({ input, ctx }) => {
-      const { activeConnection } = ctx;
+      const mailbox = await getOwnedConnection(ctx.sessionUser.id, input.connectionId);
       return runMailboxChanges(
         input.ids.map((threadId) => () =>
-          modifyThreadLabelsInDB(activeConnection.id, threadId, ['TRASH'], ['INBOX']),
+          modifyThreadLabelsInDB(mailbox.id, threadId, ['TRASH'], ['INBOX']),
         ),
       );
     }),
-  bulkArchive: activeDriverProcedure
-    .input(
-      z.object({
-        ids: z.string().array(),
-      }),
-    )
+  bulkArchive: privateProcedure
+    .input(threadIdsSchema)
     .mutation(async ({ input, ctx }) => {
-      const { activeConnection } = ctx;
+      const mailbox = await getOwnedConnection(ctx.sessionUser.id, input.connectionId);
       return runMailboxChanges(
         input.ids.map((threadId) => () =>
-          modifyThreadLabelsInDB(activeConnection.id, threadId, [], ['INBOX']),
+          modifyThreadLabelsInDB(mailbox.id, threadId, [], ['INBOX']),
         ),
       );
     }),
@@ -687,21 +747,27 @@ export const mailRouter = router({
     .mutation(() => {
       throw new TRPCError({ code: 'BAD_REQUEST', message: 'Gmail does not expose native mute through its API.' });
     }),
-  getEmailAliases: activeDriverProcedure.query(async ({ ctx }) => {
-    const { activeConnection } = ctx;
-    const executionCtx = getContext<HonoContext>().executionCtx;
-    const { stub: agent } = await getZeroAgent(activeConnection.id, executionCtx);
-    return agent.getEmailAliases();
-  }),
-  snoozeThreads: activeDriverProcedure
+  getEmailAliases: privateProcedure
+    .input(z.object({ connectionId: z.string().optional() }).optional())
+    .query(async ({ ctx, input }) => {
+      const mailbox = await getOwnedConnection(ctx.sessionUser.id, input?.connectionId);
+      const executionCtx = getContext<HonoContext>().executionCtx;
+      const { stub: agent } = await getZeroAgent(mailbox.id, executionCtx);
+      const aliases = await agent.getEmailAliases();
+      const result: { email: string; name?: string; primary?: boolean }[] = [];
+      for (const { email, name, primary } of aliases) result.push({ email, name, primary });
+      return result;
+    }),
+  snoozeThreads: privateProcedure
     .input(
       z.object({
         ids: z.string().array(),
         wakeAt: z.string(),
+        connectionId: z.string().optional(),
       }),
     )
     .mutation(async ({ input, ctx }) => {
-      const { activeConnection } = ctx;
+      const mailbox = await getOwnedConnection(ctx.sessionUser.id, input.connectionId);
       if (!input.ids.length) {
         return { success: false, error: 'No thread IDs provided' };
       }
@@ -713,14 +779,14 @@ export const mailRouter = router({
 
       await runMailboxChanges(
         input.ids.map((threadId) => () =>
-          modifyThreadLabelsInDB(activeConnection.id, threadId, ['SNOOZED'], ['INBOX']),
+          modifyThreadLabelsInDB(mailbox.id, threadId, ['SNOOZED'], ['INBOX']),
         ),
       );
 
       const wakeAtIso = wakeAtDate.toISOString();
       await Promise.all(
         input.ids.map((threadId) =>
-          env.snoozed_emails.put(`${threadId}__${activeConnection.id}`, wakeAtIso, {
+          env.snoozed_emails.put(`${threadId}__${mailbox.id}`, wakeAtIso, {
             metadata: { wakeAt: wakeAtIso },
           }),
         ),
@@ -728,37 +794,34 @@ export const mailRouter = router({
 
       return { success: true };
     }),
-  unsnoozeThreads: activeDriverProcedure
-    .input(
-      z.object({
-        ids: z.array(z.string()),
-      }),
-    )
+  unsnoozeThreads: privateProcedure
+    .input(threadIdsSchema)
     .mutation(async ({ input, ctx }) => {
-      const { activeConnection } = ctx;
+      const mailbox = await getOwnedConnection(ctx.sessionUser.id, input.connectionId);
       if (!input.ids.length) return { success: false, error: 'No thread IDs' };
       await runMailboxChanges(
         input.ids.map((threadId) => () =>
-          modifyThreadLabelsInDB(activeConnection.id, threadId, ['INBOX'], ['SNOOZED']),
+          modifyThreadLabelsInDB(mailbox.id, threadId, ['INBOX'], ['SNOOZED']),
         ),
       );
       await Promise.all(
         input.ids.map((threadId) =>
-          env.snoozed_emails.delete(`${threadId}__${activeConnection.id}`),
+          env.snoozed_emails.delete(`${threadId}__${mailbox.id}`),
         ),
       );
       return { success: true };
     }),
-  getMessageAttachments: activeDriverProcedure
+  getMessageAttachments: privateProcedure
     .input(
       z.object({
         messageId: z.string(),
+        connectionId: z.string().optional(),
       }),
     )
     .query(async ({ ctx, input }) => {
-      const { activeConnection } = ctx;
+      const mailbox = await getOwnedConnection(ctx.sessionUser.id, input.connectionId);
       const executionCtx = getContext<HonoContext>().executionCtx;
-      const { stub: agent } = await getZeroAgent(activeConnection.id, executionCtx);
+      const { stub: agent } = await getZeroAgent(mailbox.id, executionCtx);
       return agent.getMessageAttachments(input.messageId) as Promise<
         {
           filename: string;
@@ -801,27 +864,29 @@ export const mailRouter = router({
         });
       }
     }),
-  getRawEmail: activeDriverProcedure
+  getRawEmail: privateProcedure
     .input(
       z.object({
         id: z.string(),
+        connectionId: z.string().optional(),
       }),
     )
     .query(async ({ input, ctx }) => {
-      const { activeConnection } = ctx;
-      const { stub: agent } = await getZeroAgent(activeConnection.id);
+      const mailbox = await getOwnedConnection(ctx.sessionUser.id, input.connectionId);
+      const { stub: agent } = await getZeroAgent(mailbox.id);
       return agent.getRawEmail(input.id);
     }),
-  verifyEmail: activeDriverProcedure
+  verifyEmail: privateProcedure
     .input(
       z.object({
         id: z.string(),
+        connectionId: z.string().optional(),
       }),
     )
     .query(async ({ input, ctx }) => {
       try {
-        const { activeConnection } = ctx;
-        const { stub: agent } = await getZeroAgent(activeConnection.id);
+        const mailbox = await getOwnedConnection(ctx.sessionUser.id, input.connectionId);
+        const { stub: agent } = await getZeroAgent(mailbox.id);
 
         console.log(`[VERIFY_EMAIL] Getting raw email for message ID: ${input.id}`);
         const rawEmail = await agent.getRawEmail(input.id);

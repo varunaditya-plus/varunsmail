@@ -20,7 +20,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { TextEffect } from '@/components/motion-primitives/text-effect';
 import { ScheduleSendPicker } from './schedule-send-picker';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useActiveConnection } from '@/hooks/use-connections';
+import { useActiveConnection, useConnections } from '@/hooks/use-connections';
 import { useEmailAliases } from '@/hooks/use-email-aliases';
 import useComposeEditor from '@/hooks/use-compose-editor';
 import { CurvedArrow, Sparkles, X } from '../icons/icons';
@@ -62,6 +62,7 @@ type ThreadContent = {
 }[];
 
 interface EmailComposerProps {
+  connectionId?: string;
   initialTo?: string[];
   initialCc?: string[];
   initialBcc?: string[];
@@ -77,6 +78,7 @@ interface EmailComposerProps {
     message: string;
     attachments: File[];
     fromEmail?: string;
+    draftId?: string;
     scheduleAt?: string;
   }) => Promise<void>;
   onClose?: () => void;
@@ -101,6 +103,7 @@ const schema = z.object({
 });
 
 export function EmailComposer({
+  connectionId,
   initialTo = [],
   initialCc = [],
   initialBcc = [],
@@ -114,8 +117,12 @@ export function EmailComposer({
   settingsLoading = false,
   editorClassName,
 }: EmailComposerProps) {
-  const { data: aliases } = useEmailAliases();
+  const { data: aliases } = useEmailAliases(connectionId);
   const { data: activeConnection } = useActiveConnection();
+  const { data: connectionData } = useConnections();
+  const composerConnection =
+    connectionData?.connections.find((connection) => connection.id === connectionId) ??
+    activeConnection;
   const { data: settings } = useSettings();
   const [showCc, setShowCc] = useState(initialCc.length > 0);
   const [showBcc, setShowBcc] = useState(initialBcc.length > 0);
@@ -126,7 +133,7 @@ export function EmailComposer({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [threadId] = useQueryState('threadId');
   const [isComposeOpen, setIsComposeOpen] = useQueryState('isComposeOpen');
-  const { data: emailData } = useThread(threadId ?? null);
+  const { data: emailData } = useThread(threadId ?? null, connectionId);
   const [draftId, setDraftId] = useQueryState('draftId');
   const [aiGeneratedMessage, setAiGeneratedMessage] = useState<string | null>(null);
   const [aiIsLoading, setAiIsLoading] = useState(false);
@@ -234,8 +241,8 @@ export function EmailComposer({
       message: initialMessage,
       attachments: initialAttachments,
       fromEmail:
-        aliases?.find((alias) => alias.email === activeConnection?.email)?.email ||
-        settings?.settings?.defaultEmailAlias ||
+        aliases?.find((alias) => alias.email === composerConnection?.email)?.email ||
+        aliases?.find((alias) => alias.email === settings?.settings?.defaultEmailAlias)?.email ||
         aliases?.find((alias) => alias.primary)?.email ||
         aliases?.[0]?.email ||
         '',
@@ -355,7 +362,7 @@ export function EmailComposer({
       setIsLoading(true);
       setAiGeneratedMessage(null);
       // Save draft before sending, we want to send drafts instead of sending new emails
-      if (hasUnsavedChanges) await saveDraft();
+      const effectiveDraftId = hasUnsavedChanges ? await saveDraft() : draftId ?? undefined;
 
       await onSendEmail({
         to: values.to,
@@ -365,6 +372,7 @@ export function EmailComposer({
         message: editor.getHTML(),
         attachments: values.attachments || [],
         fromEmail: values.fromEmail,
+        draftId: effectiveDraftId,
         scheduleAt,
       });
       setHasUnsavedChanges(false);
@@ -446,13 +454,15 @@ export function EmailComposer({
   const saveDraft = async () => {
     const values = getValues();
 
-    if (!hasUnsavedChanges) return;
+    if (!hasUnsavedChanges) return draftId ?? undefined;
     const messageText = editor.getText();
 
-    if (messageText.trim() === initialMessage.trim()) return;
-    if (editor.getHTML() === initialMessage.trim()) return;
-    if (!values.to.length || !values.subject.length || !messageText.length) return;
-    if (aiGeneratedMessage || aiIsLoading || isGeneratingSubject) return;
+    if (messageText.trim() === initialMessage.trim()) return draftId ?? undefined;
+    if (editor.getHTML() === initialMessage.trim()) return draftId ?? undefined;
+    if (!values.to.length || !values.subject.length || !messageText.length) {
+      return draftId ?? undefined;
+    }
+    if (aiGeneratedMessage || aiIsLoading || isGeneratingSubject) return draftId ?? undefined;
 
     try {
       setIsSavingDraft(true);
@@ -466,6 +476,7 @@ export function EmailComposer({
         id: draftId,
         threadId: threadId ? threadId : null,
         fromEmail: values.fromEmail ? values.fromEmail : null,
+        connectionId,
       };
 
       const response = await createDraft(draftData);
@@ -473,6 +484,7 @@ export function EmailComposer({
       if (response?.id && response.id !== draftId) {
         setDraftId(response.id);
       }
+      return response?.id ?? draftId ?? undefined;
     } catch (error) {
       console.error('Error saving draft:', error);
       toast.error('Failed to save draft');
@@ -582,15 +594,15 @@ export function EmailComposer({
   // keep fromEmail in sync when settings or aliases load afterwards
   useEffect(() => {
     const preferred =
-      aliases?.find((alias) => alias.email === activeConnection?.email)?.email ??
-      settings?.settings?.defaultEmailAlias ??
+      aliases?.find((alias) => alias.email === composerConnection?.email)?.email ??
+      aliases?.find((alias) => alias.email === settings?.settings?.defaultEmailAlias)?.email ??
       aliases?.find((a) => a.primary)?.email ??
       aliases?.[0]?.email;
 
     if (preferred && getValues('fromEmail') !== preferred) {
       setValue('fromEmail', preferred, { shouldDirty: false });
     }
-  }, [activeConnection?.email, settings?.settings?.defaultEmailAlias, aliases, getValues, setValue]);
+  }, [composerConnection?.email, settings?.settings?.defaultEmailAlias, aliases, getValues, setValue]);
 
   const handleQualityChange = async (newQuality: ImageQuality) => {
     setImageQuality(newQuality);
@@ -803,6 +815,12 @@ export function EmailComposer({
               to={toEmails}
               cc={ccEmails ?? []}
               bcc={bccEmails ?? []}
+              senderEmail={fromEmail || composerConnection?.email}
+              senderName={
+                aliases?.find((alias) => alias.email === fromEmail)?.name ??
+                composerConnection?.name ??
+                undefined
+              }
               setRecipients={(field, val) => setValue(field, val)}
             />
             <Input

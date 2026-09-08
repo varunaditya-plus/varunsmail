@@ -1,5 +1,6 @@
 import { eq, count, inArray, and, sql, desc, lt, like, or } from 'drizzle-orm';
 import type { DrizzleSqliteDODatabase } from 'drizzle-orm/durable-sqlite';
+import { decodeThreadCursor, encodeThreadCursor } from '../../../lib/thread-cursor';
 import { threads, threadLabels, labels } from './schema';
 import type * as schema from './schema';
 
@@ -144,7 +145,7 @@ export async function get(db: DB, params: { id: string }): Promise<Thread | null
 }
 
 export async function list(db: DB): Promise<Thread[]> {
-  return await db.select().from(threads).orderBy(desc(threads.latestReceivedOn));
+  return await db.select().from(threads).orderBy(desc(threads.latestReceivedOn), desc(threads.id));
 }
 
 export async function countThreads(db: DB): Promise<number> {
@@ -339,7 +340,7 @@ export async function findThreadsWithAllLabels(db: DB, labelIds: string[]): Prom
         labelIds.length,
       ),
     )
-    .orderBy(desc(threads.latestReceivedOn));
+    .orderBy(desc(threads.latestReceivedOn), desc(threads.id));
 
   return results;
 }
@@ -355,7 +356,7 @@ export async function findThreadsWithAnyLabels(db: DB, labelIds: string[]): Prom
     .innerJoin(threadLabels, eq(threads.id, threadLabels.threadId))
     .where(inArray(threadLabels.labelId, labelIds))
     .groupBy(threads.id)
-    .orderBy(desc(threads.latestReceivedOn));
+    .orderBy(desc(threads.latestReceivedOn), desc(threads.id));
 
   return results;
 }
@@ -366,7 +367,7 @@ export async function findThreadsWithLabel(db: DB, labelId: string): Promise<Thr
     .from(threads)
     .innerJoin(threadLabels, eq(threads.id, threadLabels.threadId))
     .where(eq(threadLabels.labelId, labelId))
-    .orderBy(desc(threads.latestReceivedOn));
+    .orderBy(desc(threads.latestReceivedOn), desc(threads.id));
 
   return results;
 }
@@ -381,7 +382,7 @@ export async function findThreadsWithTextSearch(db: DB, searchText: string): Pro
         like(threads.latestSender, `%${searchText}%`),
       ),
     )
-    .orderBy(desc(threads.latestReceivedOn));
+    .orderBy(desc(threads.latestReceivedOn), desc(threads.id));
 
   return results;
 }
@@ -418,14 +419,22 @@ function buildTextSearchConditions(searchText: string) {
 
 // Helper function to build pagination conditions
 function buildPaginationConditions(pageToken: string) {
-  return lt(threads.latestReceivedOn, pageToken);
+  const cursor = decodeThreadCursor(pageToken)!;
+  return or(
+    lt(threads.latestReceivedOn, cursor.receivedOn),
+    and(eq(threads.latestReceivedOn, cursor.receivedOn), lt(threads.id, cursor.threadId)),
+  );
 }
 
 // Helper function to calculate pagination result
 function calculatePaginationResult(results: Thread[], maxResults: number) {
   const hasNextPage = results.length > maxResults;
   const threadResults = hasNextPage ? results.slice(0, maxResults) : results;
-  const nextPageToken = hasNextPage ? results[maxResults].latestReceivedOn : null;
+  const last = threadResults[threadResults.length - 1];
+  const nextPageToken =
+    hasNextPage && last
+      ? encodeThreadCursor({ receivedOn: last.latestReceivedOn ?? '', threadId: last.id })
+      : null;
 
   return { threads: threadResults, nextPageToken };
 }
@@ -466,7 +475,7 @@ export async function findThreadsWithPagination(
     .select(threadSelect)
     .from(threads)
     .where(whereClause)
-    .orderBy(desc(threads.latestReceivedOn))
+    .orderBy(desc(threads.latestReceivedOn), desc(threads.id))
     .limit(maxResults + 1);
 
   return calculatePaginationResult(results, maxResults);
@@ -478,7 +487,7 @@ export async function findThreadsByFolder(db: DB, folderLabel: string): Promise<
     .from(threads)
     .innerJoin(threadLabels, eq(threads.id, threadLabels.threadId))
     .where(eq(threadLabels.labelId, folderLabel))
-    .orderBy(desc(threads.latestReceivedOn));
+    .orderBy(desc(threads.latestReceivedOn), desc(threads.id));
 
   return results;
 }
@@ -496,7 +505,8 @@ export async function findThreadsByFolderWithPagination(
   const conditions = [eq(threadLabels.labelId, folderLabel)];
 
   if (pageToken) {
-    conditions.push(lt(threads.latestReceivedOn, pageToken));
+    const paginationCondition = buildPaginationConditions(pageToken);
+    if (paginationCondition) conditions.push(paginationCondition);
   }
 
   const results = await db
@@ -504,12 +514,16 @@ export async function findThreadsByFolderWithPagination(
     .from(threads)
     .innerJoin(threadLabels, eq(threads.id, threadLabels.threadId))
     .where(and(...conditions))
-    .orderBy(desc(threads.latestReceivedOn))
+    .orderBy(desc(threads.latestReceivedOn), desc(threads.id))
     .limit(maxResults + 1);
 
   const hasNextPage = results.length > maxResults;
   const threadResults = hasNextPage ? results.slice(0, maxResults) : results;
-  const nextPageToken = hasNextPage ? results[maxResults - 1].latestReceivedOn : null;
+  const last = threadResults[threadResults.length - 1];
+  const nextPageToken =
+    hasNextPage && last
+      ? encodeThreadCursor({ receivedOn: last.latestReceivedOn ?? '', threadId: last.id })
+      : null;
 
   return { threads: threadResults, nextPageToken };
 }

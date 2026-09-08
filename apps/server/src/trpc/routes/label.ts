@@ -1,6 +1,19 @@
 import { activeDriverProcedure, createRateLimiterMiddleware, router } from '../trpc';
-import { getZeroAgent } from '../../lib/server-utils';
+import { getZeroAgent, getZeroDB } from '../../lib/server-utils';
+import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
+
+async function getConnectionId(
+  ctx: { activeConnection: { id: string }; sessionUser: { id: string } },
+  connectionId?: string,
+) {
+  if (!connectionId) return ctx.activeConnection.id;
+  const db = await getZeroDB(ctx.sessionUser.id);
+  if (!(await db.findUserConnection(connectionId))) {
+    throw new TRPCError({ code: 'NOT_FOUND', message: 'Mailbox not found' });
+  }
+  return connectionId;
+}
 
 export const labelsRouter = router({
   list: activeDriverProcedure
@@ -10,6 +23,7 @@ export const labelsRouter = router({
         limiter: 120,
       }),
     )
+    .input(z.object({ connectionId: z.string().optional() }).optional())
     .output(
       z.array(
         z.object({
@@ -25,9 +39,9 @@ export const labelsRouter = router({
         }),
       ),
     )
-    .query(async ({ ctx }) => {
-      const { activeConnection } = ctx;
-      const { stub: agent } = await getZeroAgent(activeConnection.id);
+    .query(async ({ ctx, input }) => {
+      const connectionId = await getConnectionId(ctx, input?.connectionId);
+      const { stub: agent } = await getZeroAgent(connectionId);
       return await agent.getUserLabels();
     }),
   create: activeDriverProcedure
@@ -40,6 +54,7 @@ export const labelsRouter = router({
     .input(
       z.object({
         name: z.string(),
+        connectionId: z.string().optional(),
         color: z
           .object({
             backgroundColor: z.string(),
@@ -52,10 +67,11 @@ export const labelsRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const { activeConnection } = ctx;
-      const { stub: agent } = await getZeroAgent(activeConnection.id);
+      const connectionId = await getConnectionId(ctx, input.connectionId);
+      const { stub: agent } = await getZeroAgent(connectionId);
       const label = {
-        ...input,
+        name: input.name,
+        color: input.color,
         type: 'user',
       };
       return await agent.createLabel(label);

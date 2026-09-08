@@ -1,5 +1,6 @@
 import { trpcClient } from '@/providers/query-provider';
 import { LABELS, FOLDERS } from '@/lib/utils';
+import { groupThreadKeys } from '@/lib/thread-ref';
 
 export type ThreadDestination = 'inbox' | 'archive' | 'spam' | 'bin' | 'snoozed' | null;
 export type FolderLocation = 'inbox' | 'archive' | 'spam' | 'sent' | 'bin' | string;
@@ -8,6 +9,7 @@ export interface MoveThreadOptions {
   threadIds: string[];
   currentFolder: FolderLocation;
   destination: ThreadDestination;
+  connectionId?: string;
 }
 
 export function isActionAvailable(folder: FolderLocation, action: ThreadDestination): boolean {
@@ -17,10 +19,13 @@ export function isActionAvailable(folder: FolderLocation, action: ThreadDestinat
 
   switch (pattern) {
     // From inbox rules
+    case `unified_to_spam`:
     case `${FOLDERS.INBOX}_to_spam`:
       return true;
+    case `unified_to_archive`:
     case `${FOLDERS.INBOX}_to_archive`:
       return true;
+    case `unified_to_bin`:
     case `${FOLDERS.INBOX}_to_bin`:
       return true;
 
@@ -46,10 +51,15 @@ export function getAvailableActions(folder: FolderLocation): ThreadDestination[]
   return allPossibleActions.filter((action) => isActionAvailable(folder, action));
 }
 
-export async function moveThreadsTo({ threadIds, currentFolder, destination }: MoveThreadOptions) {
+export async function moveThreadsTo({
+  threadIds,
+  currentFolder,
+  destination,
+  connectionId,
+}: MoveThreadOptions) {
   try {
     if (!threadIds.length) return;
-    const isInInbox = currentFolder === FOLDERS.INBOX || !currentFolder;
+    const isInInbox = currentFolder === FOLDERS.INBOX || currentFolder === 'unified' || !currentFolder;
     const isInSpam = currentFolder === FOLDERS.SPAM;
     const isInBin = currentFolder === FOLDERS.BIN;
 
@@ -98,11 +108,16 @@ export async function moveThreadsTo({ threadIds, currentFolder, destination }: M
       return;
     }
 
-    return trpcClient.mail.modifyLabels.mutate({
-      threadId: threadIds,
-      addLabels: addLabel ? [addLabel] : [],
-      removeLabels: removeLabel ? [removeLabel] : [],
-    });
+    return Promise.all(
+      [...groupThreadKeys(threadIds, connectionId)].map(([connectionId, ids]) =>
+        trpcClient.mail.modifyLabels.mutate({
+          threadId: ids,
+          connectionId,
+          addLabels: addLabel ? [addLabel] : [],
+          removeLabels: removeLabel ? [removeLabel] : [],
+        }),
+      ),
+    );
   } catch (error) {
     console.error(`Error moving thread(s):`, error);
     throw error;

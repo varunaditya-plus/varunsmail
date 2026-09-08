@@ -110,7 +110,14 @@ export interface MailListProps {
 export type MailSelectMode = 'mass' | 'range' | 'single' | 'selectAllBelow';
 
 export type ThreadProps = {
-  message: { id: string; historyId?: string | null };
+  message: {
+    id: string;
+    historyId?: string | null;
+    connectionId?: string;
+    key?: string;
+    receivedOn?: string;
+    account?: { id: string; email: string; name: string | null; picture: string | null };
+  };
   onClick?: (message: ParsedMessage) => () => void;
   isKeyboardFocused?: boolean;
 };

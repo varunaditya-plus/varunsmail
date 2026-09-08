@@ -12,9 +12,11 @@ import {
 import {
   Archive,
   ArchiveX,
+  BellRing,
   ExternalLink,
   Forward,
   Inbox,
+  ListTodo,
   MailOpen,
   Reply,
   ReplyAll,
@@ -29,12 +31,15 @@ import { LabelDialog } from '@/components/labels/label-dialog';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
 import { ExclamationCircle, Mail, Clock } from '../icons/icons';
 import { SnoozeDialog } from '@/components/mail/snooze-dialog';
+import { ReminderDialog } from '@/components/mail/reminder-dialog';
+import { RuleDialog } from '@/components/mail/rule-dialog';
 import { type ThreadDestination } from '@/lib/thread-actions';
 import { useThread, useThreads } from '@/hooks/use-threads';
 import { useMemo, type ReactNode, useState, useCallback } from 'react';
 import { useTRPC } from '@/providers/query-provider';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useLabels } from '@/hooks/use-labels';
+import { useActiveConnection, useConnections } from '@/hooks/use-connections';
 import { FOLDERS, LABELS } from '@/lib/utils';
 import { useMail } from '../mail/use-mail';
 import { Checkbox } from '../ui/checkbox';
@@ -43,6 +48,7 @@ import { useParams } from 'react-router';
 import { useQueryState } from 'nuqs';
 import { toast } from 'sonner';
 import type { Label as LabelType } from '@/types';
+import { parseThreadKey } from '@/lib/thread-ref';
 
 interface EmailAction {
   id: string;
@@ -57,6 +63,8 @@ interface EmailAction {
 interface EmailContextMenuProps {
   children: ReactNode;
   threadId: string;
+  connectionId?: string;
+  threadKey?: string;
   isInbox?: boolean;
   isSpam?: boolean;
   isSent?: boolean;
@@ -64,13 +72,13 @@ interface EmailContextMenuProps {
   refreshCallback?: () => void;
 }
 
-const LabelsList = ({ threadId, bulkSelected, onCreateLabel }: { threadId: string; bulkSelected: string[]; onCreateLabel: () => void }) => {
-  const { userLabels: labels } = useLabels();
+const LabelsList = ({ threadId, connectionId, threadKey, bulkSelected, onCreateLabel }: { threadId: string; connectionId?: string; threadKey: string; bulkSelected: string[]; onCreateLabel: () => void }) => {
+  const { userLabels: labels } = useLabels(connectionId);
   const { optimisticToggleLabel } = useOptimisticActions();
-  const targetThreadIds = bulkSelected.length > 0 ? bulkSelected : [threadId];
+  const targetThreadIds = bulkSelected.length > 0 ? bulkSelected : [threadKey];
 
-  const { data: thread } = useThread(threadId);
-  const rightClickedThreadOptimisticState = useOptimisticThreadState(threadId);
+  const { data: thread } = useThread(threadId, connectionId);
+  const rightClickedThreadOptimisticState = useOptimisticThreadState(threadKey);
 
   if (!labels || !thread) return null;
 
@@ -147,6 +155,8 @@ const LabelsList = ({ threadId, bulkSelected, onCreateLabel }: { threadId: strin
 export function ThreadContextMenu({
   children,
   threadId,
+  connectionId,
+  threadKey: selectedThreadKey = threadId,
   isInbox = true,
   isSpam = false,
   isSent = false,
@@ -160,11 +170,20 @@ export function ThreadContextMenu({
   const isSnoozedFolder = currentFolder === FOLDERS.SNOOZED;
   const [, setMode] = useQueryState('mode');
   const [, setThreadId] = useQueryState('threadId');
-  const { data: threadData } = useThread(threadId);
+  const [, setConnectionId] = useQueryState('connectionId');
+  const { data: threadData } = useThread(threadId, connectionId);
   const [, setActiveReplyId] = useQueryState('activeReplyId');
-  const optimisticState = useOptimisticThreadState(threadId);
+  const optimisticState = useOptimisticThreadState(selectedThreadKey);
   const trpc = useTRPC();
-  const { refetch: refetchLabels } = useLabels();
+  const queryClient = useQueryClient();
+  const { data: activeConnection } = useActiveConnection();
+  const { data: connectionData } = useConnections();
+  const resolvedConnectionId = connectionId ?? activeConnection?.id;
+  const resolvedConnection =
+    connectionData?.connections.find((connection) => connection.id === resolvedConnectionId) ??
+    activeConnection;
+  const supportsWorkflows = resolvedConnection?.providerId === 'google';
+  const { refetch: refetchLabels } = useLabels(resolvedConnectionId);
   const {
     optimisticMoveThreadsTo,
     optimisticToggleStar,
@@ -177,6 +196,14 @@ export function ThreadContextMenu({
   } = useOptimisticActions();
   const { mutateAsync: deleteThread } = useMutation(trpc.mail.delete.mutationOptions());
   const { mutateAsync: createLabel } = useMutation(trpc.labels.create.mutationOptions());
+  const addToFocus = useMutation(trpc.mailboxWorkflows.focus.add.mutationOptions());
+  const sentMessage = useMemo(
+    () =>
+      [...(threadData?.messages ?? [])].reverse().find(
+        (message) => message.tags.some(({ id, name }) => id === 'SENT' || name === 'SENT'),
+      ),
+    [threadData?.messages],
+  );
 
   const { isUnread, isStarred, isImportant } = useMemo(() => {
     const unread = threadData?.hasUnread ?? false;
@@ -208,7 +235,7 @@ export function ThreadContextMenu({
       if (mail.bulkSelected.length) {
         targets = mail.bulkSelected;
       } else {
-        targets = [threadId];
+        targets = [selectedThreadKey];
       }
 
       let destination: ThreadDestination = null;
@@ -229,7 +256,7 @@ export function ThreadContextMenu({
   };
 
   const handleFavorites = () => {
-    const targets = mail.bulkSelected.length ? mail.bulkSelected : [threadId];
+    const targets = mail.bulkSelected.length ? mail.bulkSelected : [selectedThreadKey];
 
     const newStarredState = !isStarred;
 
@@ -241,7 +268,7 @@ export function ThreadContextMenu({
   };
 
   const handleToggleImportant = () => {
-    const targets = mail.bulkSelected.length ? mail.bulkSelected : [threadId];
+    const targets = mail.bulkSelected.length ? mail.bulkSelected : [selectedThreadKey];
     const newImportantState = !isImportant;
 
     // Use optimistic update with undo functionality
@@ -254,7 +281,7 @@ export function ThreadContextMenu({
   };
 
   const handleReadUnread = () => {
-    const targets = mail.bulkSelected.length ? mail.bulkSelected : [threadId];
+    const targets = mail.bulkSelected.length ? mail.bulkSelected : [selectedThreadKey];
     const newReadState = isUnread; // If currently unread, mark as read (true)
 
     // Use optimistic update with undo functionality
@@ -275,23 +302,28 @@ export function ThreadContextMenu({
   const handleThreadReply = () => {
     setMode('reply');
     setThreadId(threadId);
+    setConnectionId(connectionId ?? null);
     if (threadData?.latest) setActiveReplyId(threadData?.latest?.id);
   };
 
   const handleThreadReplyAll = () => {
     setMode('replyAll');
     setThreadId(threadId);
+    setConnectionId(connectionId ?? null);
     if (threadData?.latest) setActiveReplyId(threadData?.latest?.id);
   };
 
   const handleThreadForward = () => {
     setMode('forward');
     setThreadId(threadId);
+    setConnectionId(connectionId ?? null);
     if (threadData?.latest) setActiveReplyId(threadData?.latest?.id);
   };
 
   const handleOpenInNewTab = () => {
-    window.open(`/mail/${folder}?threadId=${threadId}`, '_blank');
+    const params = new URLSearchParams({ threadId });
+    if (connectionId) params.set('connectionId', connectionId);
+    window.open(`/mail/${folder}?${params}`, '_blank');
   };
 
   const primaryActions: EmailAction[] = useMemo(
@@ -329,12 +361,13 @@ export function ThreadContextMenu({
   );
 
   const handleDelete = () => () => {
-    const targets = mail.bulkSelected.length ? mail.bulkSelected : [threadId];
+    const targets = mail.bulkSelected.length ? mail.bulkSelected : [selectedThreadKey];
 
     toast.promise(
       Promise.all(
-        targets.map(async (id) => {
-          return deleteThread({ id });
+        targets.map(async (key) => {
+          const ref = parseThreadKey(key, connectionId);
+          return deleteThread({ id: ref.threadId, connectionId: ref.connectionId });
         }),
       ),
       {
@@ -390,7 +423,7 @@ export function ThreadContextMenu({
           label: 'Unsnooze',
           icon: <Inbox className="mr-2.5 h-4 w-4 opacity-60" />,
           action: () => {
-            const targets = mail.bulkSelected.length ? mail.bulkSelected : [threadId];
+            const targets = mail.bulkSelected.length ? mail.bulkSelected : [selectedThreadKey];
             optimisticUnsnooze(targets, currentFolder);
             if (mail.bulkSelected.length) {
               setMail({ ...mail, bulkSelected: [] });
@@ -473,20 +506,57 @@ export function ThreadContextMenu({
 
   const [snoozeOpen, setSnoozeOpen] = useState(false);
   const [createLabelOpen, setCreateLabelOpen] = useState(false);
+  const [reminderOpen, setReminderOpen] = useState(false);
+  const [ruleOpen, setRuleOpen] = useState(false);
 
   const handleOpenCreateLabel = useCallback(() => {
     setCreateLabelOpen(true);
   }, []);
 
   const handleSnoozeConfirm = (wakeAt: Date) => {
-    const targets = mail.bulkSelected.length ? mail.bulkSelected : [threadId];
+    const targets = mail.bulkSelected.length ? mail.bulkSelected : [selectedThreadKey];
     optimisticSnooze(targets, currentFolder, wakeAt);
     setSnoozeOpen(false);
+  };
+
+  const handleAddToFocus = async () => {
+    if (!resolvedConnectionId || !supportsWorkflows) return;
+    const targets = mail.bulkSelected.length ? mail.bulkSelected : [selectedThreadKey];
+    const gmailConnectionIds = new Set(
+      connectionData?.connections
+        .filter((connection) => connection.providerId === 'google')
+        .map((connection) => connection.id) ?? [],
+    );
+    const refs = targets.map((key) => parseThreadKey(key, resolvedConnectionId));
+    if (refs.some((ref) => !ref.connectionId || !gmailConnectionIds.has(ref.connectionId))) {
+      toast.error('Focus & Reply supports Gmail threads');
+      return;
+    }
+    try {
+      await Promise.all(
+        refs.map((ref) =>
+          addToFocus.mutateAsync({
+            connectionId: ref.connectionId ?? resolvedConnectionId,
+            threadId: ref.threadId,
+          }),
+        ),
+      );
+      await queryClient.invalidateQueries({
+        queryKey: trpc.mailboxWorkflows.focus.list.queryKey(),
+      });
+      if (mail.bulkSelected.length) {
+        setMail((current) => ({ ...current, bulkSelected: [] }));
+      }
+      toast.success(`${refs.length} ${refs.length === 1 ? 'thread' : 'threads'} added to Focus & Reply`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to add thread');
+    }
   };
 
   const handleCreateLabel = async (data: LabelType) => {
     const labelData = {
       name: data.name,
+      connectionId: resolvedConnectionId,
       color: {
         backgroundColor: data.color?.backgroundColor || '#202020',
         textColor: data.color?.textColor || '#FFFFFF'
@@ -595,7 +665,13 @@ export function ThreadContextMenu({
               {m['common.mail.labels']()}
             </ContextMenuSubTrigger>
             <ContextMenuSubContent className="dark:bg-panelDark max-h-[520px] w-48 overflow-y-auto bg-white">
-              <LabelsList threadId={threadId} bulkSelected={mail.bulkSelected} onCreateLabel={handleOpenCreateLabel} />
+              <LabelsList
+                threadId={threadId}
+                connectionId={connectionId}
+                threadKey={selectedThreadKey}
+                bulkSelected={mail.bulkSelected}
+                onCreateLabel={handleOpenCreateLabel}
+              />
             </ContextMenuSubContent>
           </ContextMenuSub>
 
@@ -606,6 +682,33 @@ export function ThreadContextMenu({
           <ContextMenuSeparator className="bg-[#E7E7E7] dark:bg-[#252525]" />
 
           {otherActions.map(renderAction)}
+
+          <ContextMenuSeparator className="bg-[#E7E7E7] dark:bg-[#252525]" />
+
+          <ContextMenuItem
+            onClick={() => setReminderOpen(true)}
+            disabled={!resolvedConnectionId || !supportsWorkflows || !sentMessage}
+            className="font-normal"
+          >
+            <BellRing className="mr-2.5 h-4 w-4 opacity-60" />
+            Remind me if nobody replies
+          </ContextMenuItem>
+          <ContextMenuItem
+            onClick={handleAddToFocus}
+            disabled={!resolvedConnectionId || !supportsWorkflows || addToFocus.isPending}
+            className="font-normal"
+          >
+            <ListTodo className="mr-2.5 h-4 w-4 opacity-60" />
+            Add to Focus & Reply
+          </ContextMenuItem>
+          <ContextMenuItem
+            onClick={() => setRuleOpen(true)}
+            disabled={!resolvedConnectionId || !supportsWorkflows}
+            className="font-normal"
+          >
+            <Tag className="mr-2.5 h-4 w-4 opacity-60" />
+            Create sender rule
+          </ContextMenuItem>
         </ContextMenuContent>
       </ContextMenu>
       <SnoozeDialog
@@ -613,6 +716,23 @@ export function ThreadContextMenu({
         onOpenChange={setSnoozeOpen}
         onConfirm={handleSnoozeConfirm}
       />
+      {resolvedConnectionId && supportsWorkflows && sentMessage ? (
+        <ReminderDialog
+          open={reminderOpen}
+          onOpenChange={setReminderOpen}
+          connectionId={resolvedConnectionId}
+          threadId={threadId}
+          sentMessageId={sentMessage.id}
+        />
+      ) : null}
+      {resolvedConnectionId && supportsWorkflows ? (
+        <RuleDialog
+          open={ruleOpen}
+          onOpenChange={setRuleOpen}
+          connectionId={resolvedConnectionId}
+          threadId={threadId}
+        />
+      ) : null}
     </>
   );
 }

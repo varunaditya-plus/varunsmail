@@ -37,7 +37,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import { EmailVerificationBadge } from './email-verification-badge';
 import type { Sender, ParsedMessage, Attachment } from '@/types';
-import { useActiveConnection } from '@/hooks/use-connections';
+import { useActiveConnection, useConnections } from '@/hooks/use-connections';
 import { useAttachments } from '@/hooks/use-attachments';
 import { useTRPC } from '@/providers/query-provider';
 import { useThreadLabels } from '@/hooks/use-labels';
@@ -656,8 +656,8 @@ const MoreAboutQuery = ({
 
 const MailDisplay = ({ emailData, index, totalEmails, demo, threadAttachments }: Props) => {
   const [isCollapsed, setIsCollapsed] = useState<boolean>(false);
-  const { data: threadData } = useThread(emailData.threadId ?? null);
-  const { data: messageAttachments } = useAttachments(emailData.id);
+  const { data: threadData } = useThread(emailData.threadId ?? null, emailData.connectionId);
+  const { data: messageAttachments } = useAttachments(emailData.id, emailData.connectionId);
   //   const [unsubscribed, setUnsubscribed] = useState(false);
   //   const [isUnsubscribing, setIsUnsubscribing] = useState(false);
   const [preventCollapse, setPreventCollapse] = useState(false);
@@ -675,8 +675,13 @@ const MailDisplay = ({ emailData, index, totalEmails, demo, threadAttachments }:
   const [activeReplyId, setActiveReplyId] = useQueryState('activeReplyId');
   const { labels: threadLabels } = useThreadLabels(
     emailData.tags ? emailData.tags.map((l) => l.id) : [],
+    emailData.connectionId,
   );
   const { data: activeConnection } = useActiveConnection();
+  const { data: connectionsData } = useConnections();
+  const currentConnection =
+    connectionsData?.connections.find((connection) => connection.id === emailData.connectionId) ??
+    activeConnection;
   const [researchSender, setResearchSender] = useState<Sender | null>(null);
   const [searchQuery, setSearchQuery] = useState<string | null>(null);
   //   const trpc = useTRPC();
@@ -1207,7 +1212,7 @@ const MailDisplay = ({ emailData, index, totalEmails, demo, threadAttachments }:
   );
 
   const people = useMemo(() => {
-    if (!activeConnection) return [];
+    if (!currentConnection) return [];
     const allPeople = [
       ...(folder === 'sent' ? [] : [emailData.sender]),
       ...(emailData.to || []),
@@ -1217,11 +1222,11 @@ const MailDisplay = ({ emailData, index, totalEmails, demo, threadAttachments }:
     return allPeople.filter(
       (p): p is Sender =>
         Boolean(p?.email) &&
-        p.email !== activeConnection!.email &&
+        p.email !== currentConnection.email &&
         p.name !== 'No Sender Name' &&
         p === allPeople.find((other) => other?.email === p?.email),
     );
-  }, [emailData, activeConnection]);
+  }, [emailData, currentConnection]);
 
   return (
     <div
@@ -1344,7 +1349,10 @@ const MailDisplay = ({ emailData, index, totalEmails, demo, threadAttachments }:
                             >
                               {cleanNameDisplay(emailData?.sender?.name)}
                             </span>
-                            <EmailVerificationBadge messageId={emailData?.id} />
+                            <EmailVerificationBadge
+                              messageId={emailData?.id}
+                              connectionId={emailData.connectionId}
+                            />
                           </div>
 
                           <Popover open={openDetailsPopover} onOpenChange={handlePopoverChange}>

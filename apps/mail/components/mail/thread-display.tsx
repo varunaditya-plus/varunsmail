@@ -34,17 +34,21 @@ import { useAnimations } from '@/hooks/use-animations';
 import { AnimatePresence, motion } from 'motion/react';
 import { MailDisplaySkeleton } from './mail-skeleton';
 import { useTRPC } from '@/providers/query-provider';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { useActiveConnection, useConnections } from '@/hooks/use-connections';
 import { Button } from '@/components/ui/button';
 import { cleanHtml } from '@/lib/email-utils';
+import { threadKey } from '@/lib/thread-ref';
 import ReplyCompose from './reply-composer';
+import { ReminderDialog } from './reminder-dialog';
+import { RuleDialog } from './rule-dialog';
 import { NotesPanel } from './note-panel';
 import { cn, FOLDERS } from '@/lib/utils';
 import { m } from '@/paraglide/messages';
 import MailDisplay from './mail-display';
 import { useParams } from 'react-router';
-import { Inbox } from 'lucide-react';
+import { BellRing, Inbox, ListTodo, Tag } from 'lucide-react';
 import { useQueryState } from 'nuqs';
 import { format } from 'date-fns';
 import { useAtom } from 'jotai';
@@ -66,15 +70,20 @@ interface ThreadDisplayProps {
   isMobile?: boolean;
   messages?: ParsedMessage[];
   id?: string;
+  fillContainer?: boolean;
 }
 
-export function ThreadDemo({ messages, isMobile }: ThreadDisplayProps) {
+export function ThreadDemo({ messages, isMobile, fillContainer }: ThreadDisplayProps) {
   const isFullscreen = false;
   return (
     <div
       className={cn(
         'flex flex-col',
-        isFullscreen ? 'h-screen' : isMobile ? 'h-full' : 'h-[calc(100dvh-2rem)]',
+        isFullscreen
+          ? 'h-screen'
+          : isMobile || fillContainer
+            ? 'h-full'
+            : 'h-[calc(100dvh-2rem)]',
       )}
     >
       <div
@@ -88,7 +97,7 @@ export function ThreadDemo({ messages, isMobile }: ThreadDisplayProps) {
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           <ScrollArea className="flex-1" type="scroll">
             <div className="pb-4">
-              {[...(messages || [])].reverse().map((message, index) => (
+              {(messages || []).map((message, index) => (
                 <div
                   key={message.id}
                   className={cn('duration-200', index > 0 && 'border-border border-t')}
@@ -158,7 +167,11 @@ export function ThreadDisplay() {
 
   const folder = params?.folder ?? 'inbox';
   const [id, setThreadId] = useQueryState('threadId');
-  const { data: emailData, isLoading, refetch: refetchThread } = useThread(id ?? null);
+  const [connectionId, setConnectionId] = useQueryState('connectionId');
+  const { data: emailData, isLoading, refetch: refetchThread } = useThread(
+    id ?? null,
+    connectionId,
+  );
   const [, items] = useThreads();
   const [isStarred, setIsStarred] = useState(false);
   const [isImportant, setIsImportant] = useState(false);
@@ -184,14 +197,51 @@ export function ThreadDisplay() {
 
   const [focusedIndex, setFocusedIndex] = useAtom(focusedIndexAtom);
   const trpc = useTRPC();
+  const queryClient = useQueryClient();
+  const { data: activeConnection } = useActiveConnection();
+  const { data: connectionData } = useConnections();
+  const targetConnection =
+    connectionData?.connections.find((connection) => connection.id === connectionId) ??
+    activeConnection;
+  const resolvedConnectionId = connectionId ?? targetConnection?.id;
+  const supportsWorkflows = targetConnection?.providerId === 'google';
   const { mutateAsync: toggleImportant } = useMutation(trpc.mail.toggleImportant.mutationOptions());
+  const addToFocus = useMutation(trpc.mailboxWorkflows.focus.add.mutationOptions());
   const [, setIsComposeOpen] = useQueryState('isComposeOpen');
+  const [reminderOpen, setReminderOpen] = useState(false);
+  const [ruleOpen, setRuleOpen] = useState(false);
+
+  const sentMessage = useMemo(
+    () =>
+      [...(emailData?.messages ?? [])].reverse().find((message) =>
+        message.tags.some(({ id: labelId, name }) => labelId === 'SENT' || name === 'SENT'),
+      ),
+    [emailData?.messages],
+  );
+
+  const handleAddToFocus = async () => {
+    if (!id || !resolvedConnectionId || !supportsWorkflows) return;
+    try {
+      await addToFocus.mutateAsync({ connectionId: resolvedConnectionId, threadId: id });
+      await queryClient.invalidateQueries({
+        queryKey: trpc.mailboxWorkflows.focus.list.queryKey(),
+      });
+      toast.success('Added to Focus & Reply');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to add thread');
+    }
+  };
 
   // Get optimistic state for this thread
-  const optimisticState = useOptimisticThreadState(id ?? '');
+  const selectedThreadKey = id ? threadKey(id, connectionId) : '';
+  const optimisticState = useOptimisticThreadState(selectedThreadKey);
 
   const handleNext = useCallback(() => {
-    if (!id || !items.length || focusedIndex === null) return setThreadId(null);
+    if (!id || !items.length || focusedIndex === null) {
+      setThreadId(null);
+      setConnectionId(null);
+      return;
+    }
     if (focusedIndex < items.length - 1) {
       const nextIndex = Math.max(1, focusedIndex + 1);
       //   console.log('nextIndex', nextIndex);
@@ -202,6 +252,7 @@ export function ThreadDisplay() {
         setActiveReplyId(null);
         setDraftId(null);
         setThreadId(nextThread.id);
+        setConnectionId(nextThread.connectionId ?? null);
         setFocusedIndex(focusedIndex + 1);
         if (animationsEnabled) {
           setNavigationDirection('next');
@@ -213,6 +264,7 @@ export function ThreadDisplay() {
     id,
     focusedIndex,
     setThreadId,
+    setConnectionId,
     setFocusedIndex,
     setMode,
     setActiveReplyId,
@@ -233,10 +285,11 @@ export function ThreadDisplay() {
   const isInBin = folder === FOLDERS.BIN;
   const handleClose = useCallback(() => {
     setThreadId(null);
+    setConnectionId(null);
     setMode(null);
     setActiveReplyId(null);
     setDraftId(null);
-  }, [setThreadId, setMode, setActiveReplyId, setDraftId]);
+  }, [setThreadId, setConnectionId, setMode, setActiveReplyId, setDraftId]);
 
   const { optimisticMoveThreadsTo } = useOptimisticActions();
 
@@ -248,10 +301,19 @@ export function ThreadDisplay() {
       setActiveReplyId(null);
       setDraftId(null);
 
-      optimisticMoveThreadsTo([id], folder, destination);
+      optimisticMoveThreadsTo([selectedThreadKey], folder, destination);
       handleNext();
     },
-    [id, folder, optimisticMoveThreadsTo, handleNext, setMode, setActiveReplyId, setDraftId],
+    [
+      id,
+      selectedThreadKey,
+      folder,
+      optimisticMoveThreadsTo,
+      handleNext,
+      setMode,
+      setActiveReplyId,
+      setDraftId,
+    ],
   );
 
   const { optimisticToggleStar } = useOptimisticActions();
@@ -260,9 +322,9 @@ export function ThreadDisplay() {
     if (!emailData || !id) return;
 
     const newStarredState = !isStarred;
-    optimisticToggleStar([id], newStarredState);
+    optimisticToggleStar([selectedThreadKey], newStarredState);
     setIsStarred(newStarredState);
-  }, [emailData, id, isStarred, optimisticToggleStar]);
+  }, [emailData, id, selectedThreadKey, isStarred, optimisticToggleStar]);
 
   const printThread = () => {
     try {
@@ -650,14 +712,14 @@ export function ThreadDisplay() {
 
   const handleToggleImportant = useCallback(async () => {
     if (!emailData || !id) return;
-    await toggleImportant({ ids: [id] });
+    await toggleImportant({ ids: [id], connectionId: connectionId ?? undefined });
     await refetchThread();
     if (isImportant) {
       toast.success(m['common.mail.markedAsImportant']());
     } else {
       toast.error('Failed to mark as important');
     }
-  }, [emailData, id]);
+  }, [emailData, id, connectionId, toggleImportant, refetchThread, isImportant]);
 
   // Set initial star state based on email data
   useEffect(() => {
@@ -811,7 +873,7 @@ export function ThreadDisplay() {
                     </div>
                   </div>
                 </button>
-                <NotesPanel threadId={id} />
+                <NotesPanel threadId={selectedThreadKey} />
                 <TooltipProvider delayDuration={0}>
                   <Tooltip>
                     <TooltipTrigger asChild>
@@ -922,6 +984,27 @@ export function ThreadDisplay() {
                         {m['common.mail.markAsImportant']()}
                       </DropdownMenuItem>
                     )}
+                    <DropdownMenuItem
+                      onClick={() => setReminderOpen(true)}
+                      disabled={!supportsWorkflows || !sentMessage}
+                    >
+                      <BellRing className="mr-2 h-4 w-4" />
+                      Remind me if nobody replies
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={handleAddToFocus}
+                      disabled={!supportsWorkflows || addToFocus.isPending}
+                    >
+                      <ListTodo className="mr-2 h-4 w-4" />
+                      Add to Focus & Reply
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => setRuleOpen(true)}
+                      disabled={!supportsWorkflows}
+                    >
+                      <Tag className="mr-2 h-4 w-4" />
+                      Create sender rule
+                    </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
               </div>
@@ -997,6 +1080,23 @@ export function ThreadDisplay() {
           </>
         )}
       </div>
+      {resolvedConnectionId && supportsWorkflows && sentMessage && id ? (
+        <ReminderDialog
+          open={reminderOpen}
+          onOpenChange={setReminderOpen}
+          connectionId={resolvedConnectionId}
+          threadId={id}
+          sentMessageId={sentMessage.id}
+        />
+      ) : null}
+      {resolvedConnectionId && supportsWorkflows && id ? (
+        <RuleDialog
+          open={ruleOpen}
+          onOpenChange={setRuleOpen}
+          connectionId={resolvedConnectionId}
+          threadId={id}
+        />
+      ) : null}
     </div>
   );
 }

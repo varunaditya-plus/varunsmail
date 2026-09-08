@@ -29,6 +29,7 @@ import { useThread, useThreads } from '@/hooks/use-threads';
 import { useSearchValue } from '@/hooks/use-search-value';
 import { EmptyStateIcon } from '../icons/empty-state-svg';
 import { highlightText } from '@/lib/email-utils.client';
+import { getAccountColor, parseThreadKey, threadKey } from '@/lib/thread-ref';
 import { cn, FOLDERS, formatDate } from '@/lib/utils';
 import { useTRPC } from '@/providers/query-provider';
 import { useThreadLabels } from '@/hooks/use-labels';
@@ -48,6 +49,9 @@ import { Avatar } from '../ui/avatar';
 import { useQueryState } from 'nuqs';
 import { useAtom } from 'jotai';
 
+const getListItemKey = (item: { id: string; connectionId?: string; key?: string }) =>
+  item.key ?? threadKey(item.id, item.connectionId);
+
 const Thread = memo(
   function Thread({
     message,
@@ -59,8 +63,12 @@ const Thread = memo(
     const { folder } = useParams<{ folder: string }>();
     const [, threads] = useThreads();
     const [threadId] = useQueryState('threadId');
-    const { data: getThreadData, isGroupThread, latestDraft } = useThread(message.id);
+    const { data: getThreadData, isGroupThread, latestDraft } = useThread(
+      message.id,
+      message.connectionId,
+    );
     const [id, setThreadId] = useQueryState('threadId');
+    const [openConnectionId, setOpenConnectionId] = useQueryState('connectionId');
     const [focusedIndex, setFocusedIndex] = useAtom(focusedIndexAtom);
 
     const { latestMessage, idToUse, cleanName } = useMemo(() => {
@@ -73,7 +81,8 @@ const Thread = memo(
       return { latestMessage, idToUse, cleanName };
     }, [getThreadData?.latest]);
 
-    const optimisticState = useOptimisticThreadState(idToUse ?? '');
+    const keyToUse = message.key ?? threadKey(idToUse ?? message.id, message.connectionId);
+    const optimisticState = useOptimisticThreadState(keyToUse);
 
     const { displayStarred, displayImportant, displayUnread, optimisticLabels, emailContent } =
       useMemo(() => {
@@ -145,9 +154,9 @@ const Thread = memo(
         if (!getThreadData || !idToUse) return;
 
         const newStarredState = !displayStarred;
-        optimisticToggleStar([idToUse], newStarredState);
+        optimisticToggleStar([keyToUse], newStarredState);
       },
-      [getThreadData, idToUse, displayStarred, optimisticToggleStar],
+      [getThreadData, idToUse, keyToUse, displayStarred, optimisticToggleStar],
     );
 
     const handleToggleImportant = useCallback(
@@ -156,9 +165,9 @@ const Thread = memo(
         if (!getThreadData || !idToUse) return;
 
         const newImportantState = !displayImportant;
-        optimisticToggleImportant([idToUse], newImportantState);
+        optimisticToggleImportant([keyToUse], newImportantState);
       },
-      [getThreadData, idToUse, displayImportant, optimisticToggleImportant],
+      [getThreadData, idToUse, keyToUse, displayImportant, optimisticToggleImportant],
     );
 
     const handleNext = useCallback(
@@ -168,39 +177,45 @@ const Thread = memo(
           const nextThread = threads[focusedIndex];
           if (nextThread) {
             setThreadId(nextThread.id);
+            setOpenConnectionId(nextThread.connectionId ?? null);
             // Don't clear activeReplyId - let ThreadDisplay handle Reply All auto-opening
             setFocusedIndex(focusedIndex);
           }
         }
       },
-      [threads, id, focusedIndex],
+      [threads, id, focusedIndex, setThreadId, setOpenConnectionId, setFocusedIndex],
     );
 
     const moveThreadTo = useCallback(
       async (destination: ThreadDestination) => {
         if (!idToUse) return;
         handleNext(idToUse);
-        optimisticMoveThreadsTo([idToUse], folder ?? '', destination);
+        optimisticMoveThreadsTo([keyToUse], folder ?? '', destination);
       },
-      [idToUse, folder, optimisticMoveThreadsTo, handleNext],
+      [idToUse, keyToUse, folder, optimisticMoveThreadsTo, handleNext],
     );
 
     const { labels: threadLabels } = useThreadLabels(
       optimisticLabels ? optimisticLabels.map((l) => l.id) : [],
+      message.connectionId,
     );
 
     const [mailState, setMail] = useMail();
     const { isMailSelected, isMailBulkSelected } = useMemo(() => {
       const isSelected =
-        !threadId || !idToUse ? false : idToUse === threadId || threadId === mailState.selected;
-      const isBulkSelected = idToUse ? mailState.bulkSelected.includes(idToUse) : false;
+        !threadId || !idToUse
+          ? false
+          : (idToUse === threadId &&
+              (!message.connectionId || message.connectionId === openConnectionId)) ||
+            keyToUse === mailState.selected;
+      const isBulkSelected = mailState.bulkSelected.includes(keyToUse);
 
       return { isMailSelected: isSelected, isMailBulkSelected: isBulkSelected };
-    }, [threadId, idToUse, mailState.selected, mailState.bulkSelected]);
+    }, [threadId, idToUse, message.connectionId, openConnectionId, keyToUse, mailState]);
 
     const { isFolderInbox, isFolderSpam, isFolderSent, isFolderBin } = useMemo(
       () => ({
-        isFolderInbox: folder === FOLDERS.INBOX || !folder,
+        isFolderInbox: folder === FOLDERS.INBOX || folder === 'unified' || !folder,
         isFolderSpam: folder === FOLDERS.SPAM,
         isFolderSent: folder === FOLDERS.SENT,
         isFolderBin: folder === FOLDERS.BIN,
@@ -228,8 +243,8 @@ const Thread = memo(
           //   }}
         >
           <div
-            data-thread-id={idToUse}
-            key={idToUse}
+            data-thread-id={keyToUse}
+            key={keyToUse}
             className={cn(
               'hover:bg-offsetLight dark:hover:bg-primary/5 group relative mx-1 flex cursor-pointer flex-col items-start rounded-lg py-2 text-left text-sm hover:opacity-100',
               (isMailSelected || isMailBulkSelected || isKeyboardFocused) &&
@@ -358,7 +373,7 @@ const Thread = memo(
                         e.stopPropagation();
                         setMail((prev: Config) => ({
                           ...prev,
-                          bulkSelected: prev.bulkSelected.filter((id: string) => id !== idToUse),
+                          bulkSelected: prev.bulkSelected.filter((id: string) => id !== keyToUse),
                         }));
                       }}
                     >
@@ -397,11 +412,11 @@ const Thread = memo(
               <div className="flex w-full justify-between">
                 <div className="w-full">
                   <div className="flex w-full flex-row items-center justify-between">
-                    <div className="flex flex-row items-center gap-[4px]">
+                    <div className="flex min-w-0 flex-row items-center gap-[4px]">
                       <span
                         className={cn(
                           displayUnread && !isMailSelected ? 'font-bold' : 'font-medium',
-                          'text-md flex items-baseline gap-1 group-hover:opacity-100',
+                          'text-md flex min-w-0 items-baseline gap-1 group-hover:opacity-100',
                         )}
                       >
                         {isFolderSent ? (
@@ -413,8 +428,22 @@ const Thread = memo(
                             {highlightText(latestMessage.subject, searchValue.highlight)}
                           </span>
                         ) : (
-                          <div className="flex items-center gap-1">
-                            <span className={cn('line-clamp-1 overflow-hidden text-sm')}>
+                          <div className="flex min-w-0 items-center gap-1">
+                            {message.connectionId && message.account ? (
+                              <span
+                                className="text-muted-foreground flex max-w-24 shrink-0 items-center gap-1 text-[10px] font-normal sm:max-w-36 xl:max-w-48"
+                                aria-label={`Account ${message.account.email}`}
+                                title={message.account.email}
+                              >
+                                <span
+                                  className="h-2.5 w-2.5 shrink-0 rounded-full"
+                                  style={{ backgroundColor: getAccountColor(message.connectionId) }}
+                                  aria-hidden="true"
+                                />
+                                <span className="truncate">{message.account.email}</span>
+                              </span>
+                            ) : null}
+                            <span className={cn('min-w-0 truncate text-sm')}>
                               {highlightText(
                                 cleanNameDisplay(latestMessage.sender.name) || '',
                                 searchValue.highlight,
@@ -543,6 +572,8 @@ const Thread = memo(
       !optimisticState.shouldHide && idToUse ? (
         <ThreadContextMenu
           threadId={idToUse}
+          connectionId={message.connectionId}
+          threadKey={keyToUse}
           isInbox={isFolderInbox}
           isSpam={isFolderSpam}
           isSent={isFolderSent}
@@ -555,7 +586,7 @@ const Thread = memo(
   },
   (prev, next) => {
     const isSameMessage =
-      prev.message.id === next.message.id &&
+      getListItemKey(prev.message) === getListItemKey(next.message) &&
       prev.isKeyboardFocused === next.isKeyboardFocused &&
       prev.index === next.index &&
       Object.is(prev.onClick, next.onClick);
@@ -708,6 +739,7 @@ export const MailList = memo(
     const { folder } = useParams<{ folder: string }>();
     const { data: settingsData } = useSettings();
     const [, setThreadId] = useQueryState('threadId');
+    const [, setConnectionId] = useQueryState('connectionId');
     const [, setDraftId] = useQueryState('draftId');
     const [searchValue, setSearchValue] = useSearchValue();
     const [anchorIndex, setAnchorIndex] = useState<number | null>(null);
@@ -726,8 +758,13 @@ export const MailList = memo(
       };
     }, [setAnchorIndex]);
 
-    const [{ refetch, isLoading, isFetching, isFetchingNextPage, hasNextPage }, items, , loadMore] =
-      useThreads();
+    const [
+      { refetch, isLoading, isFetching, isFetchingNextPage, hasNextPage, isError },
+      items,
+      ,
+      loadMore,
+      partialFailures,
+    ] = useThreads();
     const trpc = useTRPC();
     const isFetchingMail = useIsFetching({ queryKey: trpc.mail.get.queryKey() }) > 0;
     const itemsRef = useRef(items);
@@ -748,16 +785,28 @@ export const MailList = memo(
       return () => window.removeEventListener('refreshMailList', handleRefresh);
     }, [refetch]);
 
+    const navigationItems = useMemo(
+      () => items.map((item) => ({ id: getListItemKey(item) })),
+      [items],
+    );
+
     const handleNavigateToThread = useCallback(
-      (threadId: string | null) => {
-        setThreadId(threadId);
+      (key: string | null) => {
+        if (!key) {
+          setThreadId(null);
+          setConnectionId(null);
+          return;
+        }
+        const ref = parseThreadKey(key);
+        setThreadId(ref.threadId);
+        setConnectionId(ref.connectionId ?? null);
         return;
       },
-      [setThreadId],
+      [setThreadId, setConnectionId],
     );
 
     const { focusedIndex, handleMouseEnter, keyboardActive } = useMailNavigation({
-      items,
+      items: navigationItems,
       containerRef: parentRef,
       onNavigate: handleNavigateToThread,
     });
@@ -789,13 +838,15 @@ export const MailList = memo(
 
     const handleSelectMail = useCallback(
       (message: ParsedMessage) => {
-        const itemId = message.threadId ?? message.id;
+        const itemId = threadKey(message.threadId ?? message.id, message.connectionId);
         const currentMode = getSelectMode();
         console.log('Selection mode:', currentMode, 'for item:', itemId);
 
         setMail((prevMail) => {
           const mail = prevMail;
-          const clickedIndex = itemsRef.current.findIndex((item) => item.id === itemId);
+          const clickedIndex = itemsRef.current.findIndex(
+            (item) => getListItemKey(item) === itemId,
+          );
           if (clickedIndex === -1) return mail;
 
           switch (currentMode) {
@@ -807,7 +858,9 @@ export const MailList = memo(
               return { ...mail, bulkSelected: newSelected };
             }
             case 'selectAllBelow': {
-              const clickedIndex = itemsRef.current.findIndex((item) => item.id === itemId);
+              const clickedIndex = itemsRef.current.findIndex(
+                (item) => getListItemKey(item) === itemId,
+              );
               console.log(
                 'SelectAllBelow - clicked index:',
                 clickedIndex,
@@ -817,7 +870,7 @@ export const MailList = memo(
 
               if (clickedIndex !== -1) {
                 const itemsBelow = itemsRef.current.slice(clickedIndex);
-                const idsBelow = itemsBelow.map((item) => item.id);
+                const idsBelow = itemsBelow.map(getListItemKey);
                 console.log('Selecting all items below - count:', idsBelow.length);
                 return { ...mail, bulkSelected: idsBelow };
               }
@@ -831,7 +884,7 @@ export const MailList = memo(
               }
               const start = Math.min(anchorIndex, clickedIndex);
               const end = Math.max(anchorIndex, clickedIndex);
-              const rangeIds = itemsRef.current.slice(start, end + 1).map((item) => item.id);
+              const rangeIds = itemsRef.current.slice(start, end + 1).map(getListItemKey);
               const newSelected = [...new Set([...mail.bulkSelected, ...rangeIds])];
 
               return { ...mail, bulkSelected: newSelected };
@@ -856,21 +909,30 @@ export const MailList = memo(
         console.log('Mail click with mode:', mode);
 
         if (mode !== 'single') {
-          const messageThreadId = message.threadId ?? message.id;
-          const clickedIndex = itemsRef.current.findIndex((item) => item.id === messageThreadId);
+          const messageThreadId = threadKey(
+            message.threadId ?? message.id,
+            message.connectionId,
+          );
+          const clickedIndex = itemsRef.current.findIndex(
+            (item) => getListItemKey(item) === messageThreadId,
+          );
           if (clickedIndex !== -1 && mode !== 'range') {
             setAnchorIndex(clickedIndex);
           }
           return handleSelectMail(message);
         }
 
-        handleMouseEnter(message.id);
-
         const messageThreadId = message.threadId ?? message.id;
-        const clickedIndex = itemsRef.current.findIndex((item) => item.id === messageThreadId);
+        const messageKey = threadKey(messageThreadId, message.connectionId);
+        handleMouseEnter(messageKey);
+
+        const clickedIndex = itemsRef.current.findIndex(
+          (item) => getListItemKey(item) === messageKey,
+        );
         setFocusedIndex(clickedIndex);
-        if (message.unread && autoRead) optimisticMarkAsRead([messageThreadId], true);
+        if (message.unread && autoRead) optimisticMarkAsRead([messageKey], true);
         setThreadId(messageThreadId);
+        setConnectionId(message.connectionId ?? null);
         setDraftId(null);
         // Don't clear activeReplyId - let ThreadDisplay handle Reply All auto-opening
       },
@@ -881,6 +943,7 @@ export const MailList = memo(
         setFocusedIndex,
         optimisticMarkAsRead,
         setThreadId,
+        setConnectionId,
         setDraftId,
         settingsData,
         setActiveReplyId,
@@ -916,7 +979,7 @@ export const MailList = memo(
         return item ? (
           <>
             <Comp
-              key={item.id}
+              key={getListItemKey(item)}
               message={item}
               isKeyboardFocused={focusedIndex === index && keyboardActive}
               index={index}
@@ -951,21 +1014,46 @@ export const MailList = memo(
         <div
           ref={parentRef}
           className={cn(
-            'hide-link-indicator flex h-full w-full',
+            'hide-link-indicator flex h-full w-full flex-col',
             getSelectMode() === 'range' && 'select-none',
           )}
         >
           <>
+            {partialFailures.length ? (
+              <div className="mx-3 mb-2 rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+                {partialFailures.map((failure) => failure.email).join(', ')} could not be loaded.
+              </div>
+            ) : null}
             {isLoading ? (
               <div className="flex h-32 w-full items-center justify-center">
                 <div className="h-4 w-4 animate-spin rounded-full border-2 border-neutral-900 border-t-transparent dark:border-white dark:border-t-transparent" />
+              </div>
+            ) : isError && items.length === 0 ? (
+              <div className="flex h-48 w-full items-center justify-center px-6" role="alert">
+                <div className="flex max-w-xs flex-col items-center gap-3 text-center">
+                  <div>
+                    <p className="text-sm font-medium">Couldn&apos;t load your mail</p>
+                    <p className="text-muted-foreground mt-1 text-xs">
+                      Check your connection and try again.
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={isFetching}
+                    onClick={() => void refetch()}
+                  >
+                    {isFetching ? 'Trying again…' : 'Try again'}
+                  </Button>
+                </div>
               </div>
             ) : !items || items.length === 0 ? (
               <div className="flex w-full items-center justify-center">
                 <div className="flex flex-col items-center justify-center gap-2 text-center">
                   <EmptyStateIcon width={200} height={200} />
                   <div className="mt-5">
-                    <p className="text-lg">It's empty here</p>
+                    <p className="text-lg">It&apos;s empty here</p>
                     <p className="text-md text-muted-foreground dark:text-white/50">
                       Search for another email or{' '}
                       <button type="button" className="underline cursor-pointer" onClick={clearFilters}>
