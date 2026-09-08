@@ -41,19 +41,18 @@ import { agentsMiddleware } from 'hono-agents';
 import { ZeroMCP } from './routes/agent/mcp';
 import { publicRouter } from './routes/auth';
 import { WorkflowRunner } from './pipelines';
-import { autumnApi } from './routes/autumn';
+import { consumeGmailPollJob, gmailPollFailure } from './lib/gmail-poll-state';
 import { initTracing } from './lib/tracing';
 import { env, type ZeroEnv } from './env';
 import type { HonoContext } from './ctx';
 import { createDb, type DB } from './db';
 import { createAuth } from './lib/auth';
+import { authorizeAgentRequest, getOwnerMcpUserId } from './lib/private-access';
 import { aiRouter } from './routes/ai';
 import { appRouter } from './trpc';
 import { cors } from 'hono/cors';
 import { Hono } from 'hono';
 
-const SENTRY_HOST = 'o4509328786915328.ingest.us.sentry.io';
-const SENTRY_PROJECT_IDS = new Set(['4509328795303936']);
 
 export class DbRpcDO extends RpcTarget {
   constructor(
@@ -203,7 +202,7 @@ export class DbRpcDO extends RpcTarget {
 }
 
 class ZeroDB extends DurableObject<ZeroEnv> {
-  db: DB = createDb(this.env.HYPERDRIVE.connectionString).db;
+  db: DB = createDb(this.env.DB).db;
 
   async setMetaData(userId: string) {
     return new DbRpcDO(this, userId);
@@ -292,23 +291,19 @@ class ZeroDB extends DurableObject<ZeroEnv> {
     userId: string,
     notes: { id: string; order: number; isPinned?: boolean | null }[],
   ): Promise<boolean> {
-    return await this.db.transaction(async (tx) => {
-      for (const n of notes) {
-        const updateData: Record<string, unknown> = {
+    const updates = notes.map((n) =>
+      this.db
+        .update(note)
+        .set({
           order: n.order,
           updatedAt: new Date(),
-        };
-
-        if (n.isPinned !== undefined) {
-          updateData.isPinned = n.isPinned;
-        }
-        await tx
-          .update(note)
-          .set(updateData)
-          .where(and(eq(note.id, n.id), eq(note.userId, userId)));
-      }
-      return true;
-    });
+          ...(n.isPinned !== undefined ? { isPinned: n.isPinned } : {}),
+        })
+        .where(and(eq(note.id, n.id), eq(note.userId, userId))),
+    );
+    const [first, ...remaining] = updates;
+    if (first) await this.db.batch([first, ...remaining]);
+    return true;
   }
 
   async findManyNotesByIds(
@@ -342,14 +337,14 @@ class ZeroDB extends DurableObject<ZeroEnv> {
   }
 
   async deleteUser(userId: string) {
-    return await this.db.transaction(async (tx) => {
-      await tx.delete(connection).where(eq(connection.userId, userId));
-      await tx.delete(account).where(eq(account.userId, userId));
-      await tx.delete(session).where(eq(session.userId, userId));
-      await tx.delete(userSettings).where(eq(userSettings.userId, userId));
-      await tx.delete(user).where(eq(user.id, userId));
-      await tx.delete(userHotkeys).where(eq(userHotkeys.userId, userId));
-    });
+    return await this.db.batch([
+      this.db.delete(connection).where(eq(connection.userId, userId)),
+      this.db.delete(account).where(eq(account.userId, userId)),
+      this.db.delete(session).where(eq(session.userId, userId)),
+      this.db.delete(userSettings).where(eq(userSettings.userId, userId)),
+      this.db.delete(userHotkeys).where(eq(userHotkeys.userId, userId)),
+      this.db.delete(user).where(eq(user.id, userId)),
+    ]);
   }
 
   async findUserSettings(userId: string): Promise<typeof userSettings.$inferSelect | undefined> {
@@ -454,8 +449,8 @@ class ZeroDB extends DurableObject<ZeroEnv> {
   }
 
   async syncUserMatrix(connectionId: string, emailStyleMatrix: EmailMatrix) {
-    await this.db.transaction(async (tx) => {
-      const [existingMatrix] = await tx
+    await this.ctx.blockConcurrencyWhile(async () => {
+      const [existingMatrix] = await this.db
         .select({
           numMessages: writingStyleMatrix.numMessages,
           style: writingStyleMatrix.style,
@@ -470,7 +465,7 @@ class ZeroDB extends DurableObject<ZeroEnv> {
           emailStyleMatrix,
         );
 
-        await tx
+        await this.db
           .update(writingStyleMatrix)
           .set({
             numMessages: existingMatrix.numMessages + 1,
@@ -480,7 +475,7 @@ class ZeroDB extends DurableObject<ZeroEnv> {
       } else {
         const newStyle = initializeStyleMatrixFromEmail(emailStyleMatrix);
 
-        await tx
+        await this.db
           .insert(writingStyleMatrix)
           .values({
             connectionId,
@@ -621,7 +616,7 @@ const api = new Hono<HonoContext>()
     const auth = createAuth();
     c.set('auth', auth);
     const session = await auth.api.getSession({ headers: c.req.raw.headers });
-    c.set('sessionUser', session?.user);
+    c.set('sessionUser', session?.user.email.toLowerCase() === env.OWNER_EMAIL.toLowerCase() ? session.user : undefined);
 
     if (c.req.header('Authorization') && !session?.user) {
       // Start token verification span
@@ -644,7 +639,7 @@ const api = new Hono<HonoContext>()
           if (userId) {
             const db = await getZeroDB(userId);
             const user = await db.findUser();
-            c.set('sessionUser', user);
+            c.set('sessionUser', user?.email.toLowerCase() === env.OWNER_EMAIL.toLowerCase() ? user : undefined);
 
             TraceContext.completeSpan(traceId, tokenSpan.id, {
               success: true,
@@ -704,7 +699,6 @@ const api = new Hono<HonoContext>()
     c.set('auth', undefined as any);
   })
   .route('/ai', aiRouter)
-  .route('/autumn', autumnApi)
   .route('/public', publicRouter)
   .on(['GET', 'POST', 'OPTIONS'], '/auth/*', (c) => {
     return c.var.auth.handler(c.req.raw);
@@ -733,6 +727,12 @@ const api = new Hono<HonoContext>()
       500,
     );
   });
+
+const getMcpOwner = (headers: Headers) => getOwnerMcpUserId(headers, {
+  ownerEmail: env.OWNER_EMAIL,
+  getMcpSession: (headers) => createAuth().api.getMcpSession({ headers }),
+  findUser: async (userId) => (await getZeroDB(userId)).findUser(),
+});
 
 const app = new Hono<HonoContext>()
   .use(
@@ -765,20 +765,9 @@ const app = new Hono<HonoContext>()
   .mount(
     '/sse',
     async (request, env, ctx) => {
-      const authBearer = request.headers.get('Authorization');
-      if (!authBearer) {
-        console.log('No auth provided');
-        return new Response('Unauthorized', { status: 401 });
-      }
-      const auth = createAuth();
-      const session = await auth.api.getMcpSession({ headers: request.headers });
-      if (!session) {
-        console.log('Invalid auth provided', Array.from(request.headers.entries()));
-        return new Response('Unauthorized', { status: 401 });
-      }
-      ctx.props = {
-        userId: session?.userId,
-      };
+      const userId = await getMcpOwner(request.headers);
+      if (!userId) return new Response('Unauthorized', { status: 401 });
+      ctx.props = { userId };
       return ZeroMCP.serveSSE('/sse', { binding: 'ZERO_MCP' }).fetch(request, env, ctx);
     },
     { replaceRequest: false },
@@ -786,6 +775,9 @@ const app = new Hono<HonoContext>()
   .mount(
     '/mcp/thinking/sse',
     async (request, env, ctx) => {
+      const userId = await getMcpOwner(request.headers);
+      if (!userId) return new Response('Unauthorized', { status: 401 });
+      ctx.props = { userId };
       return ThinkingMCP.serveSSE('/mcp/thinking/sse', { binding: 'THINKING_MCP' }).fetch(
         request,
         env,
@@ -797,67 +789,27 @@ const app = new Hono<HonoContext>()
   .mount(
     '/mcp',
     async (request, env, ctx) => {
-      const authBearer = request.headers.get('Authorization');
-      if (!authBearer) {
-        return new Response('Unauthorized', { status: 401 });
-      }
-      const auth = createAuth();
-      const session = await auth.api.getMcpSession({ headers: request.headers });
-      if (!session) {
-        console.log('Invalid auth provided', Array.from(request.headers.entries()));
-        return new Response('Unauthorized', { status: 401 });
-      }
-      ctx.props = {
-        userId: session?.userId,
-      };
+      const userId = await getMcpOwner(request.headers);
+      if (!userId) return new Response('Unauthorized', { status: 401 });
+      ctx.props = { userId };
       return ZeroMCP.serve('/mcp', { binding: 'ZERO_MCP' }).fetch(request, env, ctx);
     },
     { replaceRequest: false },
   )
   .route('/api', api)
-  .use(
-    '*',
-    agentsMiddleware({
-      options: {
-        onBeforeConnect: (c) => {
-          if (!c.headers.get('Cookie')) {
-            return new Response('Unauthorized', { status: 401 });
-          }
-        },
-      },
-    }),
-  )
-  .get('/health', (c) => c.json({ message: 'Mail server is up.' }))
-  .get('/', (c) => c.redirect(`${env.VITE_PUBLIC_APP_URL}`))
-  .post('/monitoring/sentry', async (c) => {
-    try {
-      const envelopeBytes = await c.req.arrayBuffer();
-      const envelope = new TextDecoder().decode(envelopeBytes);
-      const piece = envelope.split('\n')[0];
-      const header = JSON.parse(piece);
-      const dsn = new URL(header['dsn']);
-      const project_id = dsn.pathname?.replace('/', '');
-
-      if (dsn.hostname !== SENTRY_HOST) {
-        throw new Error(`Invalid sentry hostname: ${dsn.hostname}`);
-      }
-
-      if (!project_id || !SENTRY_PROJECT_IDS.has(project_id)) {
-        throw new Error(`Invalid sentry project id: ${project_id}`);
-      }
-
-      const upstream_sentry_url = `https://${SENTRY_HOST}/api/${project_id}/envelope/`;
-      await fetch(upstream_sentry_url, {
-        method: 'POST',
-        body: envelopeBytes,
-      });
-
-      return c.json({}, { status: 200 });
-    } catch (e) {
-      console.error('error tunneling to sentry', e);
-      return c.json({ error: 'error tunneling to sentry' }, { status: 500 });
-    }
+  .use('/agents/*', async (c, next) => {
+    const denial = await authorizeAgentRequest(c.req.raw, {
+      ownerEmail: env.OWNER_EMAIL,
+      appOrigin: env.VITE_PUBLIC_APP_URL,
+      getSession: (headers) => createAuth().api.getSession({ headers }),
+      ownsConnection: async (userId, connectionId) => !!(await (await getZeroDB(userId)).findUserConnection(connectionId)),
+    });
+    if (denial) return denial;
+    await next();
   })
+  .use('*', agentsMiddleware())
+  .get('/health', (c) => c.json({ message: 'Zero Server is Up!' }))
+  .get('/', (c) => c.redirect(`${env.VITE_PUBLIC_APP_URL}`))
   .post('/a8n/notify/:providerId', async (c) => {
     const tracer = initTracing();
     const span = tracer.startSpan('a8n_notify', {
@@ -1050,11 +1002,24 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
         );
         return;
       }
-      case batch.queue.startsWith('thread-queue'): {
+      case batch.queue.startsWith('thread-queue') || batch.queue.startsWith('gmail-sync-') || batch.queue.startsWith('gmail-index-'): {
         const tracer = initTracing();
 
         await Promise.all(
           batch.messages.map(async (msg: any) => {
+            if (msg.body.type === 'gmail-poll-thread') {
+              const runner = this.env.WORKFLOW_RUNNER.get(
+                this.env.WORKFLOW_RUNNER.idFromName(`gmail-thread:${msg.body.connectionId}:${msg.body.threadId}`),
+              );
+              await consumeGmailPollJob(msg, (job) => runner.processPolledThread(job), (failure) => {
+                console.error('[GMAIL_POLL] Thread processing failed', { threadId: msg.body.threadId, ...failure });
+              }, async (job, delaySeconds) => {
+                const queue = batch.queue.startsWith('gmail-index-') ? this.env.gmail_index_queue
+                  : batch.queue.startsWith('gmail-sync-') ? this.env.gmail_sync_queue : this.env.thread_queue;
+                await queue.send(job, { contentType: 'json', delaySeconds });
+              });
+              return;
+            }
             const span = tracer.startSpan('thread_queue_processing', {
               attributes: {
                 'provider.id': msg.body.providerId,
@@ -1097,8 +1062,26 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
     console.log('Running scheduled tasks...');
 
     await this.processScheduledEmails();
-
+    await this.pollGoogleMailboxes();
     await this.processExpiredSubscriptions();
+  }
+
+  private async pollGoogleMailboxes() {
+    if (this.env.GOOGLE_S_ACCOUNT && this.env.GOOGLE_S_ACCOUNT !== '{}') return;
+    const { db } = createDb(this.env.DB);
+    const mailboxes = await db.query.connection.findMany({
+      where: (fields, { eq, isNotNull, and }) =>
+        and(eq(fields.providerId, 'google'), isNotNull(fields.refreshToken)),
+      columns: { id: true },
+    });
+    await Promise.all(mailboxes.map(async ({ id }) => {
+      try {
+        const runner = this.env.WORKFLOW_RUNNER.get(this.env.WORKFLOW_RUNNER.idFromName(`gmail-poll:${id}`));
+        await runner.pollMailbox(id);
+      } catch (error) {
+        console.error('[GMAIL_POLL] Mailbox polling failed', { connectionId: id, ...gmailPollFailure(error) });
+      }
+    }));
   }
 
   private async processScheduledEmails() {
@@ -1156,13 +1139,13 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
   }
 
   private async processExpiredSubscriptions() {
+    if (!this.env.GOOGLE_S_ACCOUNT || this.env.GOOGLE_S_ACCOUNT === '{}') return;
     console.log('[SCHEDULED] Checking for expired subscriptions...');
-    const { db, conn } = createDb(this.env.HYPERDRIVE.connectionString);
+    const { db } = createDb(this.env.DB);
     const allAccounts = await db.query.connection.findMany({
       where: (fields, { isNotNull, and }) =>
         and(isNotNull(fields.accessToken), isNotNull(fields.refreshToken)),
     });
-    await conn.end();
     console.log('[SCHEDULED] allAccounts', allAccounts.length);
     const now = new Date();
     const fiveDaysAgo = new Date(now.getTime() - 5 * 24 * 60 * 60 * 1000);

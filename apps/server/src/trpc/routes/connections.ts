@@ -1,14 +1,26 @@
 import { createRateLimiterMiddleware, privateProcedure, publicProcedure, router } from '../trpc';
 import { getActiveConnection, getZeroDB } from '../../lib/server-utils';
-import { Ratelimit } from '@upstash/ratelimit';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
+import { env } from '../../env';
 
 export const connectionsRouter = router({
+  syncInbox: privateProcedure
+    .input(z.object({ connectionId: z.string() }))
+    .mutation(async ({ input, ctx }) => {
+      const db = await getZeroDB(ctx.sessionUser.id);
+      const mailbox = await db.findUserConnection(input.connectionId);
+      if (!mailbox) throw new TRPCError({ code: 'NOT_FOUND' });
+      if (mailbox.providerId !== 'google' || !mailbox.refreshToken) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Gmail connection is not authorized' });
+      }
+      const runner = env.WORKFLOW_RUNNER.get(env.WORKFLOW_RUNNER.idFromName(`gmail-poll:${mailbox.id}`));
+      return runner.importInbox(mailbox.id);
+    }),
   list: privateProcedure
     .use(
       createRateLimiterMiddleware({
-        limiter: Ratelimit.slidingWindow(120, '1m'),
+        limiter: 120,
         generatePrefix: ({ sessionUser }) => `ratelimit:get-connections-${sessionUser?.id}`,
       }),
     )
@@ -58,7 +70,10 @@ export const connectionsRouter = router({
     }),
   getDefault: publicProcedure.query(async ({ ctx }) => {
     if (!ctx.sessionUser) return null;
-    const connection = await getActiveConnection();
+    const db = await getZeroDB(ctx.sessionUser.id);
+    const user = await db.findUser();
+    const connection = (user?.defaultConnectionId ? await db.findUserConnection(user.defaultConnectionId) : undefined) ?? await db.findFirstConnection();
+    if (!connection) return null;
     return {
       id: connection.id,
       email: connection.email,

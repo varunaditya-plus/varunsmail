@@ -1,15 +1,15 @@
 import { mapToObj, pipe, entries, sortBy, take, fromEntries } from 'remeda';
 
-import { writingStyleMatrix } from '../db/schema';
+import { connection, writingStyleMatrix } from '../db/schema';
+import { getZeroDB } from '../lib/server-utils';
 
-
-import { env } from '../env';
-import { google } from '@ai-sdk/google';
+import { getAIModel } from '../lib/ai-model';
 import { jsonrepair } from 'jsonrepair';
 import { generateObject } from 'ai';
 import { eq } from 'drizzle-orm';
 import { createDb } from '../db';
 import pRetry from 'p-retry';
+import { env } from '../env';
 import { z } from 'zod';
 
 // leaving these in here for testing between them
@@ -165,13 +165,11 @@ export const getWritingStyleMatrixForConnectionId = async ({
   connectionId: string;
   backupContent?: string;
 }) => {
-  const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
+  const { db } = createDb(env.DB);
 
   const matrix = await db.query.writingStyleMatrix.findFirst({
     where: eq(writingStyleMatrix.connectionId, connectionId),
   });
-
-  await conn.end();
 
   if (!matrix && backupContent) {
     if (!backupContent.trim()) {
@@ -195,48 +193,16 @@ export const updateWritingStyleMatrix = async (connectionId: string, emailBody: 
 
   await pRetry(
     async () => {
-      const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
-      await db.transaction(async (tx) => {
-        const [existingMatrix] = await tx
-          .select({
-            numMessages: writingStyleMatrix.numMessages,
-            style: writingStyleMatrix.style,
-          })
-          .from(writingStyleMatrix)
-          .where(eq(writingStyleMatrix.connectionId, connectionId));
-
-        if (existingMatrix) {
-          const newStyle = createUpdatedMatrixFromNewEmail(
-            existingMatrix.numMessages,
-            existingMatrix.style as WritingStyleMatrix,
-            emailStyleMatrix,
-          );
-
-          await tx
-            .update(writingStyleMatrix)
-            .set({
-              numMessages: existingMatrix.numMessages + 1,
-              style: newStyle,
-            })
-            .where(eq(writingStyleMatrix.connectionId, connectionId));
-        } else {
-          const newStyle = initializeStyleMatrixFromEmail(emailStyleMatrix);
-
-          await tx
-            .insert(writingStyleMatrix)
-            .values({
-              connectionId,
-              numMessages: 1,
-              style: newStyle,
-            })
-            .onConflictDoNothing();
-        }
+      const { db } = createDb(env.DB);
+      const owner = await db.query.connection.findFirst({
+        where: eq(connection.id, connectionId),
+        columns: { userId: true },
       });
-      await conn.end();
+      if (!owner) throw new Error('Connection not found');
+      const userDb = await getZeroDB(owner.userId);
+      await userDb.syncUserMatrix(connectionId, emailStyleMatrix);
     },
-    {
-      retries: 1,
-    },
+    { retries: 1 },
   );
 };
 
@@ -339,7 +305,7 @@ const extractStyleMatrix = async (emailBody: string) => {
   }
 
   const { object: result } = await generateObject({
-    model: google('gemini-2.0-flash'),
+    model: getAIModel(env, true),
     schema,
     temperature: 0,
     maxTokens: 600,

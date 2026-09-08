@@ -3,7 +3,7 @@ import {
   OutlookSearchAssistantSystemPrompt,
 } from '../../../lib/prompts';
 import { activeDriverProcedure } from '../../trpc';
-import { openai } from '@ai-sdk/openai';
+import { getAIModel } from '../../../lib/ai-model';
 import { generateObject } from 'ai';
 import { env } from '../../../env';
 import { z } from 'zod';
@@ -22,7 +22,7 @@ export const generateSearchQuery = activeDriverProcedure
           : '';
 
     const result = await generateObject({
-      model: openai(env.OPENAI_MODEL || 'gpt-4o'),
+      model: getAIModel(env),
       system: systemPrompt,
       prompt: input.query,
       schema: z.object({

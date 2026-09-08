@@ -74,13 +74,11 @@ export class SyncThreadsWorkflow extends WorkflowEntrypoint<ZeroEnv, SyncThreads
     };
 
     const setupResult = await step.do(`setup-connection-${connectionId}-${folder}`, async () => {
-      const { db, conn } = createDb(this.env.HYPERDRIVE.connectionString);
+      const { db } = createDb(this.env.DB);
 
       const foundConnection = await db.query.connection.findFirst({
         where: eq(connection.id, connectionId),
       });
-
-      await conn.end();
 
       if (!foundConnection) {
         throw new Error(`Connection ${connectionId} not found`);

@@ -27,6 +27,7 @@ export type WorkflowContext = {
   foundConnection: typeof connection.$inferSelect;
   results?: Map<string, unknown>;
   env?: unknown;
+  forceSummary?: boolean;
 };
 
 export type WorkflowStep = {

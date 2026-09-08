@@ -25,9 +25,12 @@ import { getPrompt, getEmbeddingVector } from '../pipelines.effect';
 import { messageToXML, threadToXML } from './workflow-utils';
 import type { WorkflowContext } from './workflow-engine';
 import { bulkDeleteKeys } from '../lib/bulk-delete';
+import { getAIModel } from '../lib/ai-model';
 import { getPromptName } from '../pipelines';
+import { generateObject, generateText } from 'ai';
 import { env } from 'cloudflare:workers';
 import { Effect } from 'effect';
+import { z } from 'zod';
 
 export type WorkflowFunction = (context: WorkflowContext) => Promise<any>;
 
@@ -238,16 +241,13 @@ export const workflowFunctions: Record<string, WorkflowFunction> = {
           SummarizeMessage,
         );
 
-        const messages = [
-          { role: 'system', content: SummarizeMessagePrompt },
-          { role: 'user', content: prompt },
-        ];
-
-        const response = await env.AI.run('@cf/meta/llama-4-scout-17b-16e-instruct', {
-          messages,
+        const response = await generateText({
+          model: getAIModel(env, true),
+          system: SummarizeMessagePrompt,
+          prompt,
         });
 
-        const summary = 'response' in response ? response.response : response;
+        const summary = response.text;
         if (!summary || typeof summary !== 'string') {
           throw new Error(`Invalid summary response for message ${message.id}`);
         }
@@ -322,6 +322,7 @@ export const workflowFunctions: Record<string, WorkflowFunction> = {
   },
 
   checkExistingSummary: async (context) => {
+    if (context.forceSummary) return { existingSummary: null };
     console.log('[WORKFLOW_FUNCTIONS] Getting existing thread summary for:', context.threadId);
     const threadSummary = await env.VECTORIZE.getByIds([context.threadId.toString()]);
     if (!threadSummary.length) {
@@ -497,7 +498,13 @@ Instructions:
 
 Thread Summary: ${summaryResult.summary}`;
 
-    const labelsResponse = await env.AI.run('@cf/meta/llama-4-scout-17b-16e-instruct', {
+    const labelsResponse = await generateObject({
+      model: getAIModel(env, true),
+      output: 'array',
+      schema: z.object({
+        name: z.string(),
+        source: z.enum(['existing', 'topic', 'new']),
+      }),
       messages: [
         {
           role: 'system',
@@ -508,7 +515,7 @@ Thread Summary: ${summaryResult.summary}`;
       ],
     });
 
-    const suggestions: { name: string; source: string }[] = labelsResponse.response;
+    const suggestions = labelsResponse.object;
 
     console.log('[WORKFLOW_FUNCTIONS] Generated label suggestions:', suggestions);
     return { suggestions, accountLabelsMap };
@@ -660,34 +667,24 @@ const summarizeThread = async (
         getPromptName(connectionId, EPrompts.ReSummarizeThread),
         ReSummarizeThread,
       );
-      const promptMessages = [
-        { role: 'system', content: ReSummarizeThreadPrompt },
-        {
-          role: 'user',
-          content: prompt,
-        },
-      ];
-      const response = await env.AI.run('@cf/meta/llama-4-scout-17b-16e-instruct', {
-        messages: promptMessages,
+      const response = await generateText({
+        model: getAIModel(env, true),
+        system: ReSummarizeThreadPrompt,
+        prompt,
       });
-      const summary = response.response;
+      const summary = response.text;
       return typeof summary === 'string' ? summary : null;
     } else {
       const SummarizeThreadPrompt = await getPrompt(
         getPromptName(connectionId, EPrompts.SummarizeThread),
         SummarizeThread,
       );
-      const promptMessages = [
-        { role: 'system', content: SummarizeThreadPrompt },
-        {
-          role: 'user',
-          content: prompt,
-        },
-      ];
-      const response = await env.AI.run('@cf/meta/llama-4-scout-17b-16e-instruct', {
-        messages: promptMessages,
+      const response = await generateText({
+        model: getAIModel(env, true),
+        system: SummarizeThreadPrompt,
+        prompt,
       });
-      const summary = response.response;
+      const summary = response.text;
       return typeof summary === 'string' ? summary : null;
     }
   } catch (error) {

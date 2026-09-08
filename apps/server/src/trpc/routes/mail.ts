@@ -1,5 +1,4 @@
 import {
-  forceReSync,
   getThreadsFromDB,
   getZeroAgent,
   getZeroDB,
@@ -17,6 +16,8 @@ import { updateWritingStyleMatrix } from '../../services/writing-style-service';
 import type { DeleteAllSpamResponse, IEmailSendBatch } from '../../types';
 import { activeDriverProcedure, router, privateProcedure } from '../trpc';
 import { processEmailHtml } from '../../lib/email-processor';
+import { listMailboxThreads } from '../../lib/mailbox-list';
+import { runMailboxChanges } from '../../lib/mailbox-changes';
 import { defaultPageSize, FOLDERS } from '../../lib/utils';
 import { toAttachmentFiles } from '../../lib/attachments';
 import { serializedFileSchema } from '../../lib/schemas';
@@ -57,7 +58,11 @@ export const mailRouter = router({
     }),
   forceSync: activeDriverProcedure.mutation(async ({ ctx }) => {
     const { activeConnection } = ctx;
-    return await forceReSync(activeConnection.id);
+    const runner = env.WORKFLOW_RUNNER.get(
+      env.WORKFLOW_RUNNER.idFromName(`gmail-poll:${activeConnection.id}`),
+    );
+    await runner.pollMailbox(activeConnection.id);
+    return runner.importInbox(activeConnection.id);
   }),
   get: activeDriverProcedure
     .input(
@@ -76,7 +81,7 @@ export const mailRouter = router({
       z.object({
         folder: z.string().optional().default('inbox'),
         q: z.string().optional().default(''),
-        maxResults: z.number().optional().default(defaultPageSize),
+        maxResults: z.number().int().min(1).max(500).optional().default(defaultPageSize),
         cursor: z.string().optional().default(''),
         labelIds: z.array(z.string()).optional().default([]),
       }),
@@ -103,28 +108,13 @@ export const mailRouter = router({
 
       type ThreadItem = { id: string; historyId: string | null; $raw?: unknown };
 
-      let threadsResponse: IGetThreadsResponse;
-
-      // Apply folder-to-label mapping when no search query is provided
-      const effectiveLabelIds = labelIds;
-
-      if (q) {
-        threadsResponse = await agent.rawListThreads({
-          query: q,
-          maxResults,
-          labelIds: effectiveLabelIds,
-          pageToken: cursor,
-          folder,
-        });
-      } else {
-        threadsResponse = await getThreadsFromDB(activeConnection.id, {
-          folder,
-          // query: q,
-          maxResults,
-          labelIds: effectiveLabelIds,
-          pageToken: cursor,
-        });
-      }
+      const threadsResponse: IGetThreadsResponse = await listMailboxThreads(
+        { folder, q, cursor, maxResults, labelIds },
+        {
+          live: (params) => agent.rawListThreads(params),
+          cache: (params) => getThreadsFromDB(activeConnection.id, params),
+        },
+      );
 
       if (folder === FOLDERS.SNOOZED) {
         const nowTs = Date.now();
@@ -166,30 +156,6 @@ export const mailRouter = router({
         console.debug('[listThreads] Snoozed threads after filtering:', filtered);
       }
 
-      if (threadsResponse.threads.length === 0 && folder === FOLDERS.INBOX && !q) {
-        const now = Date.now();
-        const cooldownKey = `resync_cooldown_${activeConnection.id}`;
-        const lastResyncStr = await env.gmail_processing_threads.get(cooldownKey);
-        const lastResync = lastResyncStr ? parseInt(lastResyncStr, 10) : 0;
-        const RESYNC_COOLDOWN_MS = 30000;
-
-        if (now - lastResync > RESYNC_COOLDOWN_MS) {
-          await env.gmail_processing_threads.put(cooldownKey, now.toString(), {
-            expirationTtl: 60,
-          });
-
-          getZeroAgent(activeConnection.id, executionCtx)
-            .then((_agent) => {
-              _agent.stub.forceReSync().catch((error) => {
-                console.error('[listThreads] Async resync failed:', error);
-              });
-            })
-            .catch((error) => {
-              console.error('[listThreads] Failed to get agent for async resync:', error);
-            });
-        }
-      }
-
       console.debug('[listThreads] Returning threadsResponse:', threadsResponse);
       return threadsResponse;
     }),
@@ -201,8 +167,8 @@ export const mailRouter = router({
     )
     .mutation(async ({ input, ctx }) => {
       const { activeConnection } = ctx;
-      return Promise.all(
-        input.ids.map((threadId) =>
+      return runMailboxChanges(
+        input.ids.map((threadId) => () =>
           modifyThreadLabelsInDB(activeConnection.id, threadId, [], ['UNREAD']),
         ),
       );
@@ -216,8 +182,8 @@ export const mailRouter = router({
     // TODO: Add batching
     .mutation(async ({ input, ctx }) => {
       const { activeConnection } = ctx;
-      return Promise.all(
-        input.ids.map((threadId) =>
+      return runMailboxChanges(
+        input.ids.map((threadId) => () =>
           modifyThreadLabelsInDB(activeConnection.id, threadId, ['UNREAD'], []),
         ),
       );
@@ -230,8 +196,8 @@ export const mailRouter = router({
     )
     .mutation(async ({ input, ctx }) => {
       const { activeConnection } = ctx;
-      return Promise.all(
-        input.ids.map((threadId) =>
+      return runMailboxChanges(
+        input.ids.map((threadId) => () =>
           modifyThreadLabelsInDB(activeConnection.id, threadId, ['IMPORTANT'], []),
         ),
       );
@@ -258,8 +224,8 @@ export const mailRouter = router({
       const { threadIds } = result;
 
       if (threadIds.length) {
-        await Promise.all(
-          threadIds.map((threadId) =>
+        await runMailboxChanges(
+          threadIds.map((threadId) => () =>
             modifyThreadLabelsInDB(activeConnection.id, threadId, addLabels, removeLabels),
           ),
         );
@@ -311,8 +277,8 @@ export const mailRouter = router({
 
       const shouldStar = processedThreads > 0 && !anyStarred;
 
-      await Promise.all(
-        threadIds.map((threadId) =>
+      await runMailboxChanges(
+        threadIds.map((threadId) => () =>
           modifyThreadLabelsInDB(
             activeConnection.id,
             threadId,
@@ -365,8 +331,8 @@ export const mailRouter = router({
 
       const shouldMarkImportant = processedThreads > 0 && !anyImportant;
 
-      await Promise.all(
-        threadIds.map((threadId) =>
+      await runMailboxChanges(
+        threadIds.map((threadId) => () =>
           modifyThreadLabelsInDB(
             activeConnection.id,
             threadId,
@@ -386,8 +352,8 @@ export const mailRouter = router({
     )
     .mutation(async ({ input, ctx }) => {
       const { activeConnection } = ctx;
-      return Promise.all(
-        input.ids.map((threadId) =>
+      return runMailboxChanges(
+        input.ids.map((threadId) => () =>
           modifyThreadLabelsInDB(activeConnection.id, threadId, ['STARRED'], []),
         ),
       );
@@ -400,8 +366,8 @@ export const mailRouter = router({
     )
     .mutation(async ({ input, ctx }) => {
       const { activeConnection } = ctx;
-      return Promise.all(
-        input.ids.map((threadId) =>
+      return runMailboxChanges(
+        input.ids.map((threadId) => () =>
           modifyThreadLabelsInDB(activeConnection.id, threadId, ['IMPORTANT'], []),
         ),
       );
@@ -414,8 +380,8 @@ export const mailRouter = router({
     )
     .mutation(async ({ input, ctx }) => {
       const { activeConnection } = ctx;
-      return Promise.all(
-        input.ids.map((threadId) =>
+      return runMailboxChanges(
+        input.ids.map((threadId) => () =>
           modifyThreadLabelsInDB(activeConnection.id, threadId, [], ['STARRED']),
         ),
       );
@@ -447,8 +413,8 @@ export const mailRouter = router({
     )
     .mutation(async ({ input, ctx }) => {
       const { activeConnection } = ctx;
-      return Promise.all(
-        input.ids.map((threadId) =>
+      return runMailboxChanges(
+        input.ids.map((threadId) => () =>
           modifyThreadLabelsInDB(activeConnection.id, threadId, [], ['IMPORTANT']),
         ),
       );
@@ -519,6 +485,7 @@ export const mailRouter = router({
         }
 
         const rawDelaySeconds = Math.floor((targetTime - Date.now()) / 1000);
+        const pendingTtl = Math.max(86400, rawDelaySeconds + 86400);
         const maxQueueDelay = 43200; // 12 hours
         const isLongTerm = rawDelaySeconds > maxQueueDelay;
 
@@ -531,7 +498,7 @@ export const mailRouter = router({
 
         try {
           await statusKV.put(messageId, 'pending', {
-            expirationTtl: 60 * 60 * 24,
+            expirationTtl: pendingTtl,
           });
         } catch (error) {
           console.error(`Failed to write pending status to KV for message ${messageId}`, error);
@@ -547,7 +514,7 @@ export const mailRouter = router({
 
         try {
           await payloadKV.put(messageId, JSON.stringify(mailPayload), {
-            expirationTtl: 60 * 60 * 24,
+            expirationTtl: pendingTtl,
           });
         } catch (error) {
           console.error(`Failed to write email payload to KV for message ${messageId}`, error);
@@ -611,8 +578,6 @@ export const mailRouter = router({
 
       console.log('[send] input.threadId:', input);
 
-      if (input.threadId)
-        ctx.c.executionCtx.waitUntil(reSyncThread(activeConnection.id, input.threadId));
       ctx.c.executionCtx.waitUntil(afterTask());
       return { success: true };
     }),
@@ -681,9 +646,8 @@ export const mailRouter = router({
     .mutation(async ({ input, ctx }) => {
       const { activeConnection } = ctx;
       const executionCtx = getContext<HonoContext>().executionCtx;
-      const { exec, stub } = await getZeroAgent(activeConnection.id, executionCtx);
-      exec(`DELETE FROM threads WHERE thread_id = ?`, input.id);
-      await stub.reloadFolder('bin');
+      const { stub } = await getZeroAgent(activeConnection.id, executionCtx);
+      await stub.delete(input.id);
       return true;
     }),
   bulkDelete: activeDriverProcedure
@@ -694,9 +658,9 @@ export const mailRouter = router({
     )
     .mutation(async ({ input, ctx }) => {
       const { activeConnection } = ctx;
-      return Promise.all(
-        input.ids.map((threadId) =>
-          modifyThreadLabelsInDB(activeConnection.id, threadId, ['TRASH'], []),
+      return runMailboxChanges(
+        input.ids.map((threadId) => () =>
+          modifyThreadLabelsInDB(activeConnection.id, threadId, ['TRASH'], ['INBOX']),
         ),
       );
     }),
@@ -708,8 +672,8 @@ export const mailRouter = router({
     )
     .mutation(async ({ input, ctx }) => {
       const { activeConnection } = ctx;
-      return Promise.all(
-        input.ids.map((threadId) =>
+      return runMailboxChanges(
+        input.ids.map((threadId) => () =>
           modifyThreadLabelsInDB(activeConnection.id, threadId, [], ['INBOX']),
         ),
       );
@@ -720,13 +684,8 @@ export const mailRouter = router({
         ids: z.string().array(),
       }),
     )
-    .mutation(async ({ input, ctx }) => {
-      const { activeConnection } = ctx;
-      return Promise.all(
-        input.ids.map((threadId) =>
-          modifyThreadLabelsInDB(activeConnection.id, threadId, ['MUTE'], []),
-        ),
-      );
+    .mutation(() => {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Gmail does not expose native mute through its API.' });
     }),
   getEmailAliases: activeDriverProcedure.query(async ({ ctx }) => {
     const { activeConnection } = ctx;
@@ -748,12 +707,12 @@ export const mailRouter = router({
       }
 
       const wakeAtDate = new Date(input.wakeAt);
-      if (wakeAtDate <= new Date()) {
+      if (!Number.isFinite(wakeAtDate.getTime()) || wakeAtDate <= new Date()) {
         return { success: false, error: 'Snooze time must be in the future' };
       }
 
-      await Promise.all(
-        input.ids.map((threadId) =>
+      await runMailboxChanges(
+        input.ids.map((threadId) => () =>
           modifyThreadLabelsInDB(activeConnection.id, threadId, ['SNOOZED'], ['INBOX']),
         ),
       );
@@ -778,8 +737,8 @@ export const mailRouter = router({
     .mutation(async ({ input, ctx }) => {
       const { activeConnection } = ctx;
       if (!input.ids.length) return { success: false, error: 'No thread IDs' };
-      await Promise.all(
-        input.ids.map((threadId) =>
+      await runMailboxChanges(
+        input.ids.map((threadId) => () =>
           modifyThreadLabelsInDB(activeConnection.id, threadId, ['INBOX'], ['SNOOZED']),
         ),
       );

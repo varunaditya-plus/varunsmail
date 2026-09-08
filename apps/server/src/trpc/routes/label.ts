@@ -1,6 +1,5 @@
 import { activeDriverProcedure, createRateLimiterMiddleware, router } from '../trpc';
 import { getZeroAgent } from '../../lib/server-utils';
-import { Ratelimit } from '@upstash/ratelimit';
 import { z } from 'zod';
 
 export const labelsRouter = router({
@@ -8,7 +7,7 @@ export const labelsRouter = router({
     .use(
       createRateLimiterMiddleware({
         generatePrefix: ({ sessionUser }) => `ratelimit:get-labels-${sessionUser?.id}`,
-        limiter: Ratelimit.slidingWindow(120, '1m'),
+        limiter: 120,
       }),
     )
     .output(
@@ -35,7 +34,7 @@ export const labelsRouter = router({
     .use(
       createRateLimiterMiddleware({
         generatePrefix: ({ sessionUser }) => `ratelimit:labels-post-${sessionUser?.id}`,
-        limiter: Ratelimit.slidingWindow(60, '1m'),
+        limiter: 60,
       }),
     )
     .input(
@@ -65,7 +64,7 @@ export const labelsRouter = router({
     .use(
       createRateLimiterMiddleware({
         generatePrefix: ({ sessionUser }) => `ratelimit:labels-patch-${sessionUser?.id}`,
-        limiter: Ratelimit.slidingWindow(60, '1m'),
+        limiter: 60,
       }),
     )
     .input(
@@ -91,7 +90,7 @@ export const labelsRouter = router({
     .use(
       createRateLimiterMiddleware({
         generatePrefix: ({ sessionUser }) => `ratelimit:labels-delete-${sessionUser?.id}`,
-        limiter: Ratelimit.slidingWindow(60, '1m'),
+        limiter: 60,
       }),
     )
     .input(z.object({ id: z.string() }))

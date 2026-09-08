@@ -1,5 +1,6 @@
+import { getWebSearchOptions } from '../../lib/ai-model';
+import { env } from '../../env';
 import { streamText, tool, type DataStreamWriter, type ToolSet } from 'ai';
-import { perplexity } from '@ai-sdk/perplexity';
 
 import { getZeroAgent } from '../../lib/server-utils';
 import { Tools } from '../../types';
@@ -37,18 +38,17 @@ export class ToolOrchestrator {
     // For webSearch, we want to stream the response directly without wrapping it as a tool result
     if (toolName === Tools.WebSearch) {
       return tool({
-        description: 'Search the web for information using Perplexity AI',
+        description: 'Search the web for current information',
         parameters: z.object({
           query: z.string().describe('The query to search the web for'),
         }),
         execute: async ({ query }, { toolCallId }) => {
           try {
             const response = streamText({
-              model: perplexity('sonar'),
+              ...getWebSearchOptions(env),
               messages: [
                 { role: 'system', content: 'Be precise and concise.' },
-                { role: 'system', content: 'Do not include sources in your response.' },
-                { role: 'system', content: 'Do not use markdown formatting in your response.' },
+                { role: 'system', content: 'Include inline links to sources supporting your answer.' },
                 { role: 'user', content: query },
               ],
               maxTokens: 1024,

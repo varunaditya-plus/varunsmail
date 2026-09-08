@@ -17,6 +17,8 @@ import {
 } from './thread-workflow-utils/workflow-engine';
 import { getServiceAccount } from './lib/factories/google-subscription.factory';
 import { getThread, getZeroAgent } from './lib/server-utils';
+import { pollGoogleMailbox, refreshPolledThread, importGoogleInbox } from './lib/gmail-polling';
+import { gmailPollFailure, type GmailPollJob } from './lib/gmail-poll-state';
 import { DurableObject } from 'cloudflare:workers';
 import { bulkDeleteKeys } from './lib/bulk-delete';
 import { type gmail_v1 } from '@googleapis/gmail';
@@ -130,6 +132,33 @@ export type WorkflowError =
   | UnsupportedWorkflowError;
 
 export class WorkflowRunner extends DurableObject<ZeroEnv> {
+  private polling?: Promise<void>;
+  private threadPolling: Promise<void> = Promise.resolve();
+  private inboxImport?: ReturnType<typeof importGoogleInbox>;
+
+  public importInbox(connectionId: string) {
+    this.inboxImport ??= importGoogleInbox(this.env, this.ctx.storage, connectionId).finally(() => {
+      this.inboxImport = undefined;
+    });
+    return this.inboxImport;
+  }
+
+  public pollMailbox(connectionId: string) {
+    this.polling ??= pollGoogleMailbox(this.env, this.ctx.storage, connectionId).finally(() => {
+      this.polling = undefined;
+    });
+    return this.polling;
+  }
+
+  public processPolledThread(job: GmailPollJob) {
+    const work = this.threadPolling.catch(() => undefined)
+      .then(() => refreshPolledThread(this.env, this.ctx.storage, job))
+      .then(() => undefined, (error) => gmailPollFailure(error));
+    // Return plain failure metadata: custom Error fields do not survive Durable Object RPC.
+    this.threadPolling = work.then(() => undefined);
+    return work;
+  }
+
   constructor(state: DurableObjectState, env: ZeroEnv) {
     super(state, env);
   }
@@ -261,7 +290,7 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
         historyProcessingKey,
       );
 
-      const { db, conn } = createDb(this.env.HYPERDRIVE.connectionString);
+      const { db } = createDb(this.env.DB);
 
       const foundConnection = yield* Effect.tryPromise({
         try: async () => {
@@ -270,7 +299,7 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
             .select()
             .from(connection)
             .where(eq(connection.id, connectionId.toString()));
-          await conn.end();
+
           if (!foundConnection) {
             throw new Error(`Connection not found ${connectionId}`);
           }
@@ -280,11 +309,6 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
           console.log('[ZERO_WORKFLOW] Found connection:', foundConnection.id);
           return foundConnection;
         },
-        catch: (error) => ({ _tag: 'DatabaseError' as const, error }),
-      });
-
-      yield* Effect.tryPromise({
-        try: async () => conn.end(),
         catch: (error) => ({ _tag: 'DatabaseError' as const, error }),
       });
 
@@ -571,7 +595,7 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
 
       if (providerId === EProviders.google) {
         yield* Console.log('[THREAD_WORKFLOW] Processing Google provider workflow');
-        const { db, conn } = createDb(this.env.HYPERDRIVE.connectionString);
+        const { db } = createDb(this.env.DB);
 
         const foundConnection = yield* Effect.tryPromise({
           try: async () => {
@@ -589,11 +613,6 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
             console.log('[THREAD_WORKFLOW] Found connection:', foundConnection.id);
             return foundConnection;
           },
-          catch: (error) => ({ _tag: 'DatabaseError' as const, error }),
-        });
-
-        yield* Effect.tryPromise({
-          try: async () => conn.end(),
           catch: (error) => ({ _tag: 'DatabaseError' as const, error }),
         });
 
@@ -729,7 +748,7 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
 
       if (providerId === EProviders.google) {
         console.log('[THREAD_WORKFLOW] Processing Google provider workflow');
-        const { db, conn } = createDb(this.env.HYPERDRIVE.connectionString);
+        const { db } = createDb(this.env.DB);
 
         let foundConnection;
         try {
@@ -750,12 +769,6 @@ export class WorkflowRunner extends DurableObject<ZeroEnv> {
         } catch (error) {
           console.error('[THREAD_WORKFLOW] Database error:', error);
           throw { _tag: 'DatabaseError' as const, error };
-        } finally {
-          try {
-            await conn.end();
-          } catch (error) {
-            console.error('[THREAD_WORKFLOW] Failed to close connection:', error);
-          }
         }
 
         let thread;

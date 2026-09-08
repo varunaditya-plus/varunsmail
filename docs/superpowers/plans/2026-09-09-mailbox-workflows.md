@@ -19,7 +19,7 @@
 
 ## Tasks
 
-- [ ] Restore the latest deployed D1 and Gmail polling source from `/private/tmp/varunsmail-worker-verify/main.js.map`, replace the stale Hyperdrive configuration with the complete live `varunsmail` Wrangler bindings, and verify a Worker dry run without deploying; commit `fix: restore Cloudflare production source`.
+- [x] Restore the latest deployed D1 and Gmail polling source from `/private/tmp/varunsmail-worker-verify/main.js.map`, replace the stale Hyperdrive configuration with the complete live `varunsmail` Wrangler bindings, and verify a Worker dry run without deploying; commit `fix: restore Cloudflare production source`.
 - [ ] Add connection-scoped thread references, deterministic account colors, a four-way keyset merge with per-account cursors, account filters, partial failure reporting, and explicit `connectionId` handling when opening or mutating a unified thread; test interleaved timestamps, raw-ID collisions, filters, pagination, and account failure; commit `feat: add unified inbox`.
 - [ ] Add D1 reply-reminder state, create/cancel/list routes, a thread action and date picker, reply detection from Gmail polling, and idempotent minute-cron delivery that adds `INBOX` only when no later external reply exists; test late replies, drafts, self messages, collisions, retries, and duplicate cron claims; commit `feat: add reply reminders`.
 - [ ] Add connection-scoped sender decisions, an enable-time historical sender baseline, Gmail-backed allow/archive/block/spam actions, a screening queue, and an incoming-thread policy hook guarded by message ID and enable time; test historical mail, first-time senders, grouped pending threads, all decisions, and retry safety; commit `feat: add sender screening`.

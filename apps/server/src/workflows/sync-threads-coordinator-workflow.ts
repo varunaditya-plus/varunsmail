@@ -14,6 +14,7 @@
  * Reuse or distribution of this file requires a license from Zero Email Inc.
  */
 import { WorkflowEntrypoint, WorkflowStep } from 'cloudflare:workers';
+import type { SyncThreadsResult } from './sync-threads-workflow';
 import { connectionToDriver } from '../lib/server-utils';
 import type { WorkflowEvent } from 'cloudflare:workers';
 import { connection } from '../db/schema';
@@ -69,13 +70,11 @@ export class SyncThreadsCoordinatorWorkflow extends WorkflowEntrypoint<
     };
 
     const setupResult = await step.do(`setup-connection-${connectionId}-${folder}`, async () => {
-      const { db, conn } = createDb(this.env.HYPERDRIVE.connectionString);
+      const { db } = createDb(this.env.DB);
 
       const foundConnection = await db.query.connection.findFirst({
         where: eq(connection.id, connectionId),
       });
-
-      await conn.end();
 
       if (!foundConnection) {
         throw new Error(`Connection ${connectionId} not found`);
@@ -149,7 +148,7 @@ export class SyncThreadsCoordinatorWorkflow extends WorkflowEntrypoint<
             try {
               const status = await instance.status();
               if (status.status === 'complete') {
-                return { result: status.output, workflowId: instance.id };
+                return { result: status.output as SyncThreadsResult, workflowId: instance.id };
               } else if (status.status === 'errored') {
                 throw new Error(`Workflow ${instance.id} failed`);
               }
@@ -168,7 +167,7 @@ export class SyncThreadsCoordinatorWorkflow extends WorkflowEntrypoint<
 
       // Update result with this page's data
       if (pageResult?.result) {
-        const workflowResult = pageResult.result as any;
+        const workflowResult = pageResult.result;
         result.pageWorkflowResults.push({
           pageNumber,
           workflowId: pageResult.workflowId,

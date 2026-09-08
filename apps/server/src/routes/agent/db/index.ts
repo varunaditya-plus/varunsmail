@@ -45,20 +45,29 @@ async function createMissingLabels(db: DB, labelIds: string[]): Promise<void> {
 }
 
 export async function create(db: DB, thread: InsertThread, labelIds?: string[]): Promise<Thread> {
-  return await db.transaction(async (tx) => {
-    // Create the thread first
-    const [res] = await tx
+  let result: Thread | undefined;
+  // Durable Object SQLite transactions must finish synchronously. This adapter
+  // does not return the callback result, so retain the inserted row explicitly.
+  db.transaction((tx) => {
+    result = tx
       .insert(threads)
       .values(thread)
       .onConflictDoUpdate({
         target: [threads.id],
         set: thread,
       })
-      .returning();
+      .returning()
+      .get();
+
+    if (labelIds !== undefined) {
+      tx.delete(threadLabels).where(eq(threadLabels.threadId, thread.id)).run();
+    }
 
     if (labelIds && labelIds.length > 0) {
-      // Ensure all labels exist (create missing ones)
-      await createMissingLabels(tx, labelIds);
+      tx.insert(labels)
+        .values([...new Set(labelIds)].map((id) => ({ id, name: id, color: '#000000' })))
+        .onConflictDoNothing()
+        .run();
 
       // Create thread-label relationships
       const threadLabelInserts: InsertThreadLabel[] = labelIds.map((labelId) => ({
@@ -66,11 +75,11 @@ export async function create(db: DB, thread: InsertThread, labelIds?: string[]):
         labelId,
       }));
 
-      await tx.insert(threadLabels).values(threadLabelInserts).onConflictDoNothing();
+      tx.insert(threadLabels).values(threadLabelInserts).onConflictDoNothing().run();
     }
-
-    return res;
   });
+  if (!result) throw new Error('Failed to store thread');
+  return result;
 }
 
 export async function createLabel(db: DB, label: InsertLabel): Promise<Label> {

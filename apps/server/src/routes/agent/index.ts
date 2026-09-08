@@ -44,6 +44,9 @@ import {
 } from '../../types';
 import type { IGetThreadResponse, IGetThreadsResponse, MailManager } from '../../lib/driver/types';
 import { connectionToDriver, getZeroSocketAgent, reSyncThread } from '../../lib/server-utils';
+import { applyGmailChange, refreshGmailThread } from '../../lib/gmail-mutations';
+import { queueGmailRefresh } from '../../lib/gmail-polling';
+import { runMailboxChanges } from '../../lib/mailbox-changes';
 import { generateWhatUserCaresAbout, type UserTopic } from '../../lib/analyze/interests';
 import { DurableObjectOAuthClientProvider } from 'agents/mcp/do-oauth-client-provider';
 import { AiChatPrompt, GmailSearchAssistantSystemPrompt } from '../../lib/prompts';
@@ -57,18 +60,16 @@ import { ToolOrchestrator } from './orchestrator';
 import { eq, desc, isNotNull } from 'drizzle-orm';
 import migrations from './db/drizzle/migrations';
 import { getPromptName } from '../../pipelines';
-import { anthropic } from '@ai-sdk/anthropic';
 import { connection } from '../../db/schema';
 import type { WSMessage } from 'partyserver';
 import { tools as authTools } from './tools';
 import { processToolCalls } from './utils';
 import { type ZeroEnv } from '../../env';
 import { type Connection } from 'agents';
-import { openai } from '@ai-sdk/openai';
+import { getAIModel } from '../../lib/ai-model';
 import * as schema from './db/schema';
 import { threads } from './db/schema';
 import { Effect, pipe } from 'effect';
-import { groq } from '@ai-sdk/groq';
 import { createDb } from '../../db';
 import type { Message } from 'ai';
 import { create } from './db';
@@ -320,7 +321,8 @@ export class ShardRegistry extends DurableObject<ZeroEnv> {
 })
 @Queryable()
 export class ZeroDriver extends DurableObject<ZeroEnv> {
-  transfer = new Transfer(this);
+  // Transfer only reads ctx.storage; its constructor unnecessarily fixes the environment type.
+  transfer = new Transfer(this as unknown as ConstructorParameters<typeof Transfer>[0]);
   sql: SqlStorage;
   private db: DB;
   private syncThreadsInProgress: Map<string, boolean> = new Map();
@@ -641,6 +643,11 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
     }
     const result = await this.driver.sendDraft(id, data);
     this.invalidateRecipientCache();
+    const threadId = result?.threadId || data.threadId;
+    if (threadId) await refreshGmailThread(this.env, this.name, threadId);
+    await Promise.all([this.reloadFolder('draft'), this.reloadFolder('sent')]).catch(() => {
+      console.error('[Gmail send] Folder notification is pending');
+    });
     return result;
   }
 
@@ -650,6 +657,9 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
     }
     const result = await this.driver.create(data);
     this.invalidateRecipientCache();
+    const threadId = result.threadId || data.threadId;
+    if (threadId) await refreshGmailThread(this.env, this.name, threadId);
+    await this.reloadFolder('sent').catch(() => console.error('[Gmail send] Folder notification is pending'));
     return result;
   }
 
@@ -657,11 +667,15 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
     if (!this.driver) {
       throw new Error('No driver available');
     }
-    return await this.driver.delete(id);
+    await applyGmailChange(this.env, this.name, id, () => this.driver!.delete(id));
   }
 
   async deleteAllSpam() {
-    return await deleteSpamThreads(this.db);
+    if (!this.driver) throw new Error('No driver available');
+    const result = await this.driver.deleteAllSpam();
+    if (!result.success) throw new Error(result.error || 'Gmail could not clear spam');
+    await Promise.all([this.reloadFolder('spam'), this.reloadFolder('bin')]);
+    return { deletedCount: result.count ?? 0 };
   }
 
   async getEmailAliases() {
@@ -676,6 +690,11 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
       throw new Error('No driver available');
     }
     return await this.driver.getMessageAttachments(messageId);
+  }
+
+  async getRawEmail(messageId: string) {
+    if (!this.driver) throw new Error('No driver available');
+    return this.driver.getRawEmail(messageId);
   }
 
   private dropTables() {
@@ -702,7 +721,7 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
   public async setupAuth() {
     if (this.name === 'general') return;
     if (!this.driver) {
-      const { db, conn } = createDb(this.env.HYPERDRIVE.connectionString);
+      const { db } = createDb(this.env.DB);
       const _connection = await db.query.connection.findFirst({
         where: eq(connection.id, this.name),
       });
@@ -710,7 +729,7 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
         this.driver = connectionToDriver(_connection);
         this.connection = _connection;
       }
-      this.ctx.waitUntil(conn.end());
+
     }
     if (!this.agent) this.agent = await getZeroSocketAgent(this.name);
   }
@@ -778,13 +797,7 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
   //   }
 
   async modifyLabels(threadIds: string[], addLabelIds: string[], removeLabelIds: string[]) {
-    if (!this.driver) {
-      throw new Error('No driver available');
-    }
-    return await this.driver.modifyLabels(threadIds, {
-      addLabels: addLabelIds,
-      removeLabels: removeLabelIds,
-    });
+    await runMailboxChanges(threadIds.map((id) => () => this.modifyThreadLabelsInDB(id, addLabelIds, removeLabelIds)));
   }
 
   async listHistory<T>(historyId: string) {
@@ -822,23 +835,11 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
   }
 
   async bulkDelete(threadIds: string[]) {
-    if (!this.driver) {
-      throw new Error('No driver available');
-    }
-    return await this.driver.modifyLabels(threadIds, {
-      addLabels: ['TRASH'],
-      removeLabels: ['INBOX'],
-    });
+    return this.modifyLabels(threadIds, ['TRASH'], ['INBOX']);
   }
 
   async bulkArchive(threadIds: string[]) {
-    if (!this.driver) {
-      throw new Error('No driver available');
-    }
-    return await this.driver.modifyLabels(threadIds, {
-      addLabels: [],
-      removeLabels: ['INBOX'],
-    });
+    return this.modifyLabels(threadIds, [], ['INBOX']);
   }
 
   async updateLabel(
@@ -862,7 +863,13 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
     if (!this.driver) {
       throw new Error('No driver available');
     }
-    return await this.driver.createDraft(draftData);
+    const result = await this.driver.createDraft(draftData);
+    await this.reloadFolder('draft').catch(() => console.error('[Gmail draft] Folder notification is pending'));
+    if (draftData.threadId) await queueGmailRefresh(this.env, {
+      type: 'gmail-poll-thread', connectionId: this.name, threadId: draftData.threadId,
+      index: false, notify: true,
+    }).catch(() => console.error('[Gmail draft] Cache reconciliation is pending'));
+    return result;
   }
 
   async getDraft(id: string) {
@@ -885,7 +892,7 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
     }
     await this.driver.deleteDraft(id);
     // Broadcast drafts folder refresh
-    await this.reloadFolder('drafts');
+    await this.reloadFolder('draft');
     return { success: true };
   }
 
@@ -924,136 +931,10 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
 
   async syncThread({ threadId }: { threadId: string }): Promise<ThreadSyncResult> {
     if (this.name === 'general' || this.name.includes('aggregate')) {
-      console.log(`[syncThread] Skipping sync for ${this.name} instance - thread ${threadId}`);
-      return { success: true, threadId, broadcastSent: false };
+      return { success: false, threadId, broadcastSent: false };
     }
-
-    if (this.syncThreadsInProgress.has(threadId)) {
-      console.log(`[syncThread] Sync already in progress for thread ${threadId}, skipping...`);
-      return { success: true, threadId, broadcastSent: false };
-    }
-
-    return Effect.runPromise(
-      Effect.gen(this, function* () {
-        console.log(`[syncThread] Starting sync for thread: ${threadId}`);
-        if (!this.connection) {
-          throw new Error('No connection available');
-        }
-        const result: ThreadSyncResult = {
-          success: false,
-          threadId,
-          broadcastSent: false,
-        };
-
-        this.syncThreadsInProgress.set(threadId, true);
-
-        const latest = yield* Effect.tryPromise(() =>
-          this.env.THREAD_SYNC_WORKER.get(this.env.THREAD_SYNC_WORKER.newUniqueId()).syncThread(
-            this.connection!,
-            threadId,
-          ),
-        );
-
-        if (!latest) {
-          this.syncThreadsInProgress.delete(threadId);
-          console.log(`[syncThread] Skipping thread ${threadId} - no latest message`);
-          result.success = false;
-          result.reason = 'No latest message';
-          return result;
-        }
-
-        // Normalize received date
-        const normalizedReceivedOn = yield* Effect.try({
-          try: () => new Date(latest.receivedOn).toISOString(),
-          catch: (error) =>
-            new DateNormalizationError(`Failed to normalize date for ${threadId}`, error),
-        }).pipe(
-          Effect.catchAll((error) => {
-            console.warn(
-              `[syncThread] Date normalization failed for ${threadId}, using current date:`,
-              error,
-            );
-            return Effect.succeed(new Date().toISOString());
-          }),
-        );
-
-        result.normalizedReceivedOn = normalizedReceivedOn;
-
-        // Update database
-        yield* Effect.tryPromise(() =>
-          create(
-            this.db,
-            {
-              id: threadId,
-              threadId,
-              providerId: 'google',
-              latestSender: latest.sender,
-              latestReceivedOn: normalizedReceivedOn,
-              latestSubject: latest.subject,
-            },
-            latest.tags.map((tag) => tag.id),
-          ),
-        ).pipe(
-          Effect.tap(() =>
-            Effect.sync(() => {
-              console.log(`[syncThread] Updated database for ${threadId}`);
-              this.invalidateRecipientCache();
-            }),
-          ),
-          Effect.tap(() => Effect.sync(() => this.reloadFolder('inbox'))),
-          Effect.catchAll((error) => {
-            console.error(`[syncThread] Failed to update database for ${threadId}:`, error);
-            return Effect.succeed(undefined);
-          }),
-        );
-
-        // Broadcast update if agent exists
-        if (this.agent) {
-          yield* Effect.tryPromise(() =>
-            this.agent!.broadcastChatMessage({
-              type: OutgoingMessageType.Mail_Get,
-              threadId,
-            }),
-          ).pipe(
-            Effect.tap(() =>
-              Effect.sync(() => {
-                result.broadcastSent = true;
-                console.log(`[syncThread] Broadcasted update for ${threadId}`);
-              }),
-            ),
-            Effect.catchAll((error) => {
-              console.warn(`[syncThread] Failed to broadcast update for ${threadId}:`, error);
-              return Effect.succeed(undefined);
-            }),
-          );
-        } else {
-          console.log(`[syncThread] No agent available for broadcasting ${threadId}`);
-        }
-
-        this.syncThreadsInProgress.delete(threadId);
-
-        result.success = true;
-
-        console.log(`[syncThread] Completed sync for thread: ${threadId}`, {
-          success: result.success,
-          broadcastSent: result.broadcastSent,
-          hasLatestMessage: !!latest,
-        });
-
-        return result;
-      }).pipe(
-        Effect.catchAll((error) => {
-          this.syncThreadsInProgress.delete(threadId);
-          console.error(`[syncThread] Critical error syncing thread ${threadId}:`, error);
-          return Effect.succeed({
-            success: false,
-            threadId,
-            reason: error.message,
-            broadcastSent: false,
-          });
-        }),
-      ),
-    );
+    const success = await refreshGmailThread(this.env, this.name, threadId);
+    return { success, threadId, broadcastSent: success };
   }
 
   async getThreadCount() {
@@ -1126,7 +1007,7 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
 
     const genQueryEffect = Effect.tryPromise(() =>
       generateText({
-        model: openai(this.env.OPENAI_MODEL || 'gpt-4o'),
+        model: getAIModel(this.env),
         system: GmailSearchAssistantSystemPrompt(),
         prompt: params.query,
       }).then((response) => response.text),
@@ -1317,6 +1198,7 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
           const threads = result.map((row) => ({
             id: String(row.id),
             historyId: null,
+            $raw: { latestReceivedOn: String(row.latest_received_on ?? '') },
           }));
 
           // Use latest_received_on for pagination cursor
@@ -1394,25 +1276,20 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
 
   async modifyThreadLabelsInDB(threadId: string, addLabels: string[], removeLabels: string[]) {
     try {
+      if (!this.driver) throw new Error('No driver available');
       const currentLabelsData = await getThreadLabels(this.db, threadId);
       const currentLabels = currentLabelsData.map((l) => l.id);
-
-      const result = await modifyThreadLabels(this.db, threadId, addLabels, removeLabels);
-
-      const allAffectedLabels = [...new Set([...addLabels, ...removeLabels])];
-      await Promise.all(allAffectedLabels.map((label) => this.reloadFolder(label.toLowerCase())));
-
-      await this.agent?.broadcastChatMessage({
-        type: OutgoingMessageType.Mail_Get,
-        threadId,
-      });
+      const { syncPending } = await applyGmailChange(this.env, this.name, threadId, () =>
+        this.driver!.modifyLabels([threadId], { addLabels, removeLabels }),
+      );
 
       return {
         success: true,
         threadId,
         previousLabels: currentLabels,
-        addedLabels: result.addedLabels,
-        removedLabels: result.removedLabels,
+        addedLabels: addLabels,
+        removedLabels: removeLabels,
+        syncPending,
       };
     } catch (error) {
       console.error('Failed to modify thread labels in database:', error);
@@ -1422,22 +1299,25 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
 
   async getThreadFromDB(id: string, includeDrafts: boolean = false): Promise<IGetThreadResponse> {
     try {
-      const result = await get(this.db, { id });
-      if (!result) {
-        await this.syncThread({ threadId: id });
-        return {
-          messages: [],
-          latest: undefined,
-          hasUnread: false,
-          totalReplies: 0,
-          labels: [],
-        } satisfies IGetThreadResponse;
+      const [result, storedThread] = await Promise.all([
+        get(this.db, { id }),
+        this.env.THREADS_BUCKET.get(this.getThreadKey(id)),
+      ]);
+      if (!result || !storedThread) {
+        this.ctx.waitUntil(queueGmailRefresh(this.env, {
+          type: 'gmail-poll-thread', connectionId: this.name, threadId: id, index: false, notify: false,
+        }).catch(() => console.error('[Gmail cache] Could not queue thread refresh')));
       }
-      const storedThread = await this.env.THREADS_BUCKET.get(this.getThreadKey(id));
+      if (!storedThread) {
+        if (!this.driver) throw new Error('No driver available');
+        const liveThread = await this.driver.get(id);
+        for (const message of liveThread.messages) message.connectionId = this.name;
+        if (!includeDrafts) liveThread.messages = liveThread.messages.filter((message) => !message.isDraft);
+        return liveThread;
+      }
 
-      let messages: ParsedMessage[] = storedThread
-        ? (JSON.parse(await storedThread.text()) as IGetThreadResponse).messages
-        : [];
+      const cachedThread = JSON.parse(await storedThread.text()) as IGetThreadResponse;
+      let messages: ParsedMessage[] = cachedThread.messages;
 
       const isLatestDraft = messages.some((e) => e.isDraft === true);
 
@@ -1445,7 +1325,7 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
         messages = messages.filter((e) => e.isDraft !== true);
       }
 
-      const labelsList = await getThreadLabels(this.db, id);
+      const labelsList = result ? await getThreadLabels(this.db, id) : cachedThread.labels;
       const labelIds = labelsList.map((l) => l.id);
 
       return {
@@ -1630,6 +1510,26 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
   //     return await this.getThreadFromDB(id, includeDrafts);
   //   }
 
+  public async storePolledThread(threadId: string, latest: ParsedMessage, labelIds: string[]) {
+    await create(this.db, {
+      id: threadId,
+      threadId,
+      providerId: 'google',
+      latestSender: latest.sender,
+      latestReceivedOn: latest.receivedOn,
+      latestSubject: latest.subject,
+    }, labelIds);
+    this.invalidateRecipientCache();
+  }
+
+  public async deletePolledThread(threadId: string) {
+    this.db.transaction((tx) => {
+      tx.delete(schema.threadLabels).where(eq(schema.threadLabels.threadId, threadId)).run();
+      tx.delete(schema.threads).where(eq(schema.threads.id, threadId)).run();
+    });
+    this.invalidateRecipientCache();
+  }
+
   public async storeThreadInDB(
     threadData: {
       id: string;
@@ -1770,10 +1670,7 @@ export class ZeroAgent extends AIChatAgent<ZeroEnv> {
           {},
         );
 
-        const model =
-          this.env.USE_OPENAI === 'true'
-            ? groq('openai/gpt-oss-120b')
-            : anthropic(this.env.OPENAI_MODEL || 'claude-3-7-sonnet-20250219');
+        const model = getAIModel(this.env);
 
         const result = streamText({
           model,

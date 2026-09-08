@@ -1,26 +1,23 @@
-import { createAuthMiddleware, phoneNumber, jwt, bearer, mcp } from 'better-auth/plugins';
 import { type Account, betterAuth, type BetterAuthOptions } from 'better-auth';
-import { getBrowserTimezone, isValidTimezone } from './timezones';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { getZeroDB, resetConnection } from './server-utils';
+import { jwt, bearer, mcp } from 'better-auth/plugins';
 import { getSocialProviders } from './auth-providers';
-import { redis, resend, twilio } from './services';
-import { dubAnalytics } from '@dub/better-auth';
+import { ownerAuthOptions } from './owner-auth';
 import { defaultUserSettings } from './schemas';
-import { disableBrainFunction } from './brain';
 import { APIError } from 'better-auth/api';
 import { type EProviders } from '../types';
 import { createDriver } from './driver';
-import { Autumn } from 'autumn-js';
 import { createDb } from '../db';
 import { env } from '../env';
-import { Dub } from 'dub';
 
 const connectionHandlerHook = async (account: Account) => {
+  if (account.providerId === 'credential') return;
+
   if (!account.accessToken || !account.refreshToken) {
-    console.error('Missing Access/Refresh Tokens', { account });
+    console.error('Missing mailbox tokens', { accountId: account.id });
     throw new APIError('EXPECTATION_FAILED', {
-      message: 'Missing access or refresh tokens. Reconnect the account and allow the requested permissions.',
+      message: 'Google did not return mailbox access. Reconnect the account and grant access.',
     });
   }
 
@@ -61,7 +58,7 @@ const connectionHandlerHook = async (account: Account) => {
     accessToken: account.accessToken,
     refreshToken: account.refreshToken,
     scope: driver.getScope(),
-    expiresAt: new Date(Date.now() + (account.accessTokenExpiresAt?.getTime() || 3600000)),
+    expiresAt: account.accessTokenExpiresAt ?? new Date(Date.now() + 3600000),
   };
 
   const db = await getZeroDB(account.userId);
@@ -79,234 +76,73 @@ const connectionHandlerHook = async (account: Account) => {
   }
 };
 
-export const createAuth = () => {
-  const twilioClient = twilio();
-  const dub = new Dub();
-
-  return betterAuth({
-    plugins: [
-      dubAnalytics({
-        dubClient: dub,
-      }),
-      mcp({
-        loginPage: env.VITE_PUBLIC_APP_URL + '/login',
-      }),
-      jwt(),
-      bearer(),
-      phoneNumber({
-        sendOTP: async ({ code, phoneNumber }) => {
-          await twilioClient.messages
-            .send(phoneNumber, `Your verification code is: ${code}, do not share it with anyone.`)
-            .catch((error) => {
-              console.error('Failed to send OTP', error);
-              throw new APIError('INTERNAL_SERVER_ERROR', {
-                message: `Failed to send OTP, ${error.message}`,
-              });
-            });
-        },
-      }),
-    ],
-    user: {
-      deleteUser: {
-        enabled: true,
-        async sendDeleteAccountVerification(data) {
-          const verificationUrl = data.url;
-
-          await resend().emails.send({
-            from: "Varun's Mail <no-reply@mail.varunaditya.space>",
-            to: data.user.email,
-            subject: 'Delete your mail account',
-            html: `
-            <h2>Delete Your Mail Account</h2>
-            <p>Click the link below to delete your account:</p>
-            <a href="${verificationUrl}">${verificationUrl}</a>
-          `,
-          });
-        },
-        beforeDelete: async (user, request) => {
-          if (!request) throw new APIError('BAD_REQUEST', { message: 'Request object is missing' });
-          const db = await getZeroDB(user.id);
-          const connections = await db.findManyConnections();
-          const autumn = new Autumn({ secretKey: env.AUTUMN_SECRET_KEY });
-          try {
-            await autumn.customers.delete(user.id);
-          } catch (error) {
-            console.error('Failed to delete Autumn customer:', error);
-            // Continue with deletion process despite Autumn failure
-          }
-
-          const revokedAccounts = (
-            await Promise.allSettled(
-              connections.map(async (connection) => {
-                if (!connection.accessToken || !connection.refreshToken) return false;
-                await disableBrainFunction({
-                  id: connection.id,
-                  providerId: connection.providerId as EProviders,
-                });
-                const driver = createDriver(connection.providerId, {
-                  auth: {
-                    accessToken: connection.accessToken,
-                    refreshToken: connection.refreshToken,
-                    userId: user.id,
-                    email: connection.email,
-                  },
-                });
-                const token = connection.refreshToken;
-                return await driver.revokeToken(token || '');
-              }),
-            )
-          ).map((result) => {
-            if (result.status === 'fulfilled') {
-              return result.value;
-            }
-            return false;
-          });
-
-          if (revokedAccounts.every((value) => !!value)) {
-            console.log('Failed to revoke some accounts');
-          }
-
-          await db.deleteUser();
-        },
-      },
-    },
-    databaseHooks: {
-      account: {
-        create: {
-          after: connectionHandlerHook,
-        },
-        update: {
-          after: connectionHandlerHook,
-        },
-      },
-    },
-    emailAndPassword: {
-      enabled: false,
-      requireEmailVerification: true,
-      sendResetPassword: async ({ user, url }) => {
-        await resend().emails.send({
-          from: "Varun's Mail <no-reply@mail.varunaditya.space>",
-          to: user.email,
-          subject: 'Reset your password',
-          html: `
-            <h2>Reset Your Password</h2>
-            <p>Click the link below to reset your password:</p>
-            <a href="${url}">${url}</a>
-            <p>If you didn't request this, you can safely ignore this email.</p>
-          `,
-        });
-      },
-    },
-    emailVerification: {
-      sendOnSignUp: false,
-      autoSignInAfterVerification: true,
-      sendVerificationEmail: async ({ user, token }) => {
-        const verificationUrl = `${env.VITE_PUBLIC_APP_URL}/api/auth/verify-email?token=${token}&callbackURL=/settings/connections`;
-
-        await resend().emails.send({
-          from: "Varun's Mail <no-reply@mail.varunaditya.space>",
-          to: user.email,
-          subject: 'Verify your mail account',
-          html: `
-            <h2>Verify Your Mail Account</h2>
-            <p>Click the link below to verify your email:</p>
-            <a href="${verificationUrl}">${verificationUrl}</a>
-          `,
-        });
-      },
-    },
-    hooks: {
-      after: createAuthMiddleware(async (ctx) => {
-        // all hooks that run on sign-up routes
-        if (ctx.path.startsWith('/sign-up')) {
-          // only true if this request is from a new user
-          const newSession = ctx.context.newSession;
-          if (newSession) {
-            // Check if user already has settings
-            const db = await getZeroDB(newSession.user.id);
-            const existingSettings = await db.findUserSettings();
-
-            if (!existingSettings) {
-              // get timezone from vercel's header
-              const headerTimezone = ctx.headers?.get('x-vercel-ip-timezone');
-              // validate timezone from header or fallback to browser timezone
-              const timezone =
-                headerTimezone && isValidTimezone(headerTimezone)
-                  ? headerTimezone
-                  : getBrowserTimezone();
-              // write default settings against the user
-              await db.insertUserSettings({
-                ...defaultUserSettings,
-                timezone,
-              });
-            }
-          }
-        }
-      }),
-    },
-    ...createAuthConfig(),
-  });
-};
-
 const createAuthConfig = () => {
-  const cache = redis();
-  const { db } = createDb(env.HYPERDRIVE.connectionString);
+  const { db } = createDb(env.DB);
+  const ownerOptions = ownerAuthOptions(env.OWNER_EMAIL);
+
   return {
-    database: drizzleAdapter(db, { provider: 'pg' }),
-    secondaryStorage: {
-      get: async (key: string) => {
-        const value = await cache.get(key);
-        return typeof value === 'string' ? value : value ? JSON.stringify(value) : null;
-      },
-      set: async (key: string, value: string, ttl?: number) => {
-        if (ttl) await cache.set(key, value, { ex: ttl });
-        else await cache.set(key, value);
-      },
-      delete: async (key: string) => {
-        await cache.del(key);
-      },
-    },
+    ...ownerOptions,
+    secret: env.BETTER_AUTH_SECRET,
+    database: drizzleAdapter(db, { provider: 'sqlite' }),
     advanced: {
-      ipAddress: {
-        disableIpTracking: true,
-      },
+      ipAddress: { ipAddressHeaders: ['cf-connecting-ip'] },
       cookiePrefix: env.NODE_ENV === 'development' ? 'better-auth-dev' : 'better-auth',
-      crossSubDomainCookies: {
-        enabled: true,
-        domain: env.COOKIE_DOMAIN,
-      },
+      crossSubDomainCookies: { enabled: true, domain: env.COOKIE_DOMAIN },
     },
     baseURL: env.VITE_PUBLIC_BACKEND_URL,
-    trustedOrigins: [env.VITE_PUBLIC_APP_URL, 'http://localhost:3000'],
+    trustedOrigins: [env.VITE_PUBLIC_APP_URL, env.VITE_PUBLIC_BACKEND_URL],
+    rateLimit: {
+      enabled: true,
+      storage: 'database',
+      customRules: { '/sign-in/email': { window: 60, max: 5 } },
+    },
     session: {
-      cookieCache: {
-        enabled: true,
-        maxAge: 60 * 60 * 24 * 30, // 30 days
-      },
-      expiresIn: 60 * 60 * 24 * 30, // 30 days
-      updateAge: 60 * 60 * 24 * 3, // 1 day (every 1 day the session expiration is updated)
+      cookieCache: { enabled: true, maxAge: 60 * 5 },
+      expiresIn: 60 * 60 * 24 * 30,
+      updateAge: 60 * 60 * 24 * 3,
     },
     socialProviders: getSocialProviders(env as unknown as Record<string, string>),
     account: {
       accountLinking: {
         enabled: true,
         allowDifferentEmails: true,
-        trustedProviders: ['google', 'microsoft'],
+        trustedProviders: ['google'],
       },
     },
     onAPIError: {
-      onError: (error) => {
-        console.error('API Error', error);
-      },
       errorURL: `${env.VITE_PUBLIC_APP_URL}/login`,
-      throw: true,
     },
   } satisfies BetterAuthOptions;
 };
 
-export const createSimpleAuth = () => {
-  return betterAuth(createAuthConfig());
+export const createAuth = () => {
+  const config = createAuthConfig();
+
+  return betterAuth({
+    ...config,
+    plugins: [mcp({ loginPage: env.VITE_PUBLIC_APP_URL + '/login' }), jwt(), bearer()],
+    databaseHooks: {
+      ...config.databaseHooks,
+      account: {
+        create: { after: connectionHandlerHook },
+        update: { after: connectionHandlerHook },
+      },
+      session: {
+        create: {
+          ...config.databaseHooks.session.create,
+          after: async (session) => {
+            const db = await getZeroDB(session.userId);
+            if (!(await db.findUserSettings())) {
+              await db.insertUserSettings(defaultUserSettings);
+            }
+          },
+        },
+      },
+    },
+  });
 };
+
+export const createSimpleAuth = () => betterAuth(createAuthConfig());
 
 export type Auth = ReturnType<typeof createAuth>;
 export type SimpleAuth = ReturnType<typeof createSimpleAuth>;

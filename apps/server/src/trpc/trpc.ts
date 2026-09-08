@@ -1,11 +1,9 @@
 import { getActiveConnection, getZeroDB } from '../lib/server-utils';
-import { Ratelimit, type RatelimitConfig } from '@upstash/ratelimit';
 import type { HonoContext, HonoVariables } from '../ctx';
-import { getConnInfo } from 'hono/cloudflare-workers';
 import { initTRPC, TRPCError } from '@trpc/server';
 import { createLoggingMiddleware } from '../lib/trpc-logging';
 
-import { redis } from '../lib/services';
+import { env } from '../env';
 import type { Context } from 'hono';
 import superjson from 'superjson';
 
@@ -84,7 +82,6 @@ export const activeConnectionProcedure = privateProcedure.use(async ({ ctx, next
       }, err instanceof Error ? err.message : 'Failed to get active connection');
     }
 
-    await ctx.c.var.auth.api.signOut({ headers: ctx.c.req.raw.headers });
     throw new TRPCError({
       code: 'BAD_REQUEST',
       message: err instanceof Error ? err.message : 'Failed to get active connection',
@@ -139,31 +136,17 @@ export const activeDriverProcedure = activeConnectionProcedure.use(async ({ ctx,
 });
 
 export const createRateLimiterMiddleware = (config: {
-  limiter: RatelimitConfig['limiter'];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  limiter: 10 | 60 | 120;
   generatePrefix: (ctx: TrpcContext, input: any) => string;
 }) =>
   t.middleware(async ({ next, ctx, input }) => {
-    const ratelimiter = new Ratelimit({
-      redis: redis(),
-      limiter: config.limiter,
-      analytics: true,
-      prefix: config.generatePrefix(ctx, input),
-    });
-    const finalIp = getConnInfo(ctx.c).remote.address ?? 'no-ip';
-    const { success, limit, reset, remaining } = await ratelimiter.limit(finalIp);
-
-    ctx.c.res.headers.append('X-RateLimit-Limit', limit.toString());
-    ctx.c.res.headers.append('X-RateLimit-Remaining', remaining.toString());
-    ctx.c.res.headers.append('X-RateLimit-Reset', reset.toString());
-
+    const key = config.generatePrefix(ctx, input);
+    const { success } = await env[`API_RATE_LIMIT_${config.limiter}`].limit({ key });
     if (!success) {
-      console.log(`Rate limit exceeded for IP ${finalIp}.`);
       throw new TRPCError({
         code: 'TOO_MANY_REQUESTS',
         message: 'Too many requests. Please try again later.',
       });
     }
-
     return next();
   });

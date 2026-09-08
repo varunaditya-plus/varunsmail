@@ -1,4 +1,7 @@
 import type { IGetThreadResponse, IGetThreadsResponse } from './driver/types';
+import { mergeThreadCachePages } from './thread-cache-page';
+import { cachedInboxThreadCount, replaceInboxCount } from './inbox-count';
+import { hasCachedGmailThread } from './gmail-poll-sql';
 import { OutgoingMessageType } from '../routes/agent/types';
 import { getContext } from 'hono/context-storage';
 import { connection } from '../db/schema';
@@ -22,31 +25,38 @@ export const getZeroDB = async (userId: string) => {
   return rpcTarget;
 };
 
-class MockExecutionContext implements ExecutionContext {
-  async waitUntil(promise: Promise<any>) {
+type BackgroundContext = Pick<ExecutionContext, 'waitUntil'>;
+
+class MockExecutionContext implements BackgroundContext {
+  async waitUntil(promise: Promise<unknown>) {
     try {
       await promise;
     } catch (error) {
       console.error('MockExecutionContext: Error in waitUntil', error);
     }
   }
-  passThroughOnException(): void { }
-  props: any;
 }
 
 const getRegistryClient = async (connectionId: string) => {
+  const backgroundContext: BackgroundContext = new MockExecutionContext();
   const registryClient = createClient({
     doNamespace: env.SHARD_REGISTRY,
     configs: [{ name: `connection:${connectionId}:registry` }],
-    ctx: new MockExecutionContext(),
+    // Dormroom only calls waitUntil on this context.
+    ctx: backgroundContext as ExecutionContext,
   });
   return registryClient;
 };
 
-const getShardClient = async (connectionId: string, shardId: string) => {
+const getShardClient = async (
+  connectionId: string,
+  shardId: string,
+  executionCtx: BackgroundContext = new MockExecutionContext(),
+) => {
   const shardClient = createClient({
     doNamespace: env.ZERO_DRIVER,
-    ctx: new MockExecutionContext(),
+    // Dormroom only calls waitUntil on this context.
+    ctx: executionCtx as ExecutionContext,
     configs: [{ name: `connection:${connectionId}:shard:${shardId}` }],
   });
   try {
@@ -67,7 +77,7 @@ const listShards = async (registry: RegistryClient): Promise<{ shard_id: string 
 ];
 
 const insertShard = (registry: RegistryClient, shardId: string) =>
-  registry.exec(`INSERT INTO shards (shard_id) VALUES (?)`, [shardId]);
+  registry.exec(`INSERT INTO shards (shard_id) VALUES (?)`, shardId);
 
 const deleteAllShards = async (registry: RegistryClient) => registry.exec(`DELETE FROM shards`);
 
@@ -258,19 +268,19 @@ export const raceShardDataEffect = <T, E = never>(
   });
 };
 
-const getThreadEffect = (connectionId: string, threadId: string) => {
+const getThreadShardEffect = (connectionId: string, threadId: string) => {
   return raceShardDataEffect(
     connectionId,
     (shard, shardId) =>
       Effect.gen(function* () {
-        const thread = yield* Effect.tryPromise({
-          try: async () => shard.stub.getThread(threadId, true),
+        const found = yield* Effect.tryPromise({
+          try: () => hasCachedGmailThread(shard, threadId),
           catch: (error) =>
             new Error(`Failed to setup auth or get thread from shard ${shardId}: ${error}`),
         });
 
-        if (thread) {
-          return thread;
+        if (found) {
+          return shard;
         }
 
         return yield* Effect.fail(new Error(`Thread ${threadId} not found in shard ${shardId}`));
@@ -286,15 +296,12 @@ export const getThread: (
   connectionId: string,
   threadId: string,
 ) => {
-    const result = await Effect.runPromise(getThreadEffect(connectionId, threadId));
-    if (!result.result) {
-      throw new Error(`Thread ${threadId} not found`);
-    }
-    if (!result.shardId) {
-      throw new Error(`Thread ${threadId} not found in any shard`);
-    }
-    return { result: result.result, shardId: result.shardId };
-  };
+  const cached = await Effect.runPromise(getThreadShardEffect(connectionId, threadId));
+  const shardId = cached.shardId ?? (await getActiveShardId(connectionId));
+  const shard = cached.result ?? (await getShardClient(connectionId, shardId));
+  // Probe every shard without fetching Gmail, then read or fill just one cache.
+  return { result: await shard.stub.getThread(threadId, true), shardId };
+};
 
 export const modifyThreadLabelsInDB = async (
   connectionId: string,
@@ -302,14 +309,8 @@ export const modifyThreadLabelsInDB = async (
   addLabels: string[],
   removeLabels: string[],
 ) => {
-  const threadResult = await getThread(connectionId, threadId);
-  const shard = await getShardClient(connectionId, threadResult.shardId);
-  await shard.stub.modifyThreadLabelsInDB(threadId, addLabels, removeLabels);
-
-  const agent = await getZeroSocketAgent(connectionId);
-  await agent.invalidateDoStateCache();
-
-  await sendDoState(connectionId);
+  const shard = await getZeroAgent(connectionId);
+  return shard.stub.modifyThreadLabelsInDB(threadId, addLabels, removeLabels);
 };
 
 const getActiveShardId = async (connectionId: string) => {
@@ -345,14 +346,9 @@ const getActiveShardId = async (connectionId: string) => {
   return newShardId;
 };
 
-export const getZeroAgent = async (connectionId: string, executionCtx?: ExecutionContext) => {
-  if (!executionCtx) {
-    executionCtx = new MockExecutionContext();
-  }
+export const getZeroAgent = async (connectionId: string, executionCtx?: BackgroundContext) => {
   const shardId = await getActiveShardId(connectionId);
-  const agent = await getShardClient(connectionId, shardId);
-
-  return agent;
+  return getShardClient(connectionId, shardId, executionCtx);
 };
 
 export const getZeroAgentFromShard = async (connectionId: string, shardId: string) => {
@@ -382,13 +378,8 @@ export const forceReSync = async (connectionId: string) => {
 };
 
 export const reSyncThread = async (connectionId: string, threadId: string) => {
-  try {
-    const { shardId } = await getThread(connectionId, threadId);
-    const agent = await getZeroAgentFromShard(connectionId, shardId);
-    await agent.stub.syncThread({ threadId });
-  } catch (error) {
-    console.error(`[ZeroAgent] Thread not found for threadId: ${threadId}`, error);
-  }
+  const agent = await getZeroAgent(connectionId);
+  return agent.stub.syncThread({ threadId });
 };
 
 export const getThreadsFromDB = async (
@@ -408,16 +399,6 @@ export const getThreadsFromDB = async (
 
   const maxResults = params.maxResults ?? defaultPageSize;
 
-  if (maxResults === defaultPageSize && !params.pageToken && !params.q) {
-    return Effect.promise(async () => {
-      const agent = await getZeroAgent(connectionId);
-      return await agent.stub.getThreadsFromDB({
-        ...params,
-        maxResults: maxResults,
-      });
-    }).pipe(Effect.runPromise);
-  }
-
   return Effect.runPromise(
     aggregateShardDataEffect<IGetThreadsResponse>(
       connectionId,
@@ -428,27 +409,7 @@ export const getThreadsFromDB = async (
             maxResults: maxResults,
           }),
         ),
-      (shardResults) => {
-        // Combine all threads from all shards
-        const allThreads = shardResults.flatMap((result) => result.threads);
-
-        // Sort by some criteria if needed (assuming threads have a sortable field)
-        // allThreads.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
-
-        // Take only the requested amount
-        const threads = allThreads.slice(0, maxResults);
-
-        // Determine if there's a next page token (simplified logic)
-        const hasMoreResults = allThreads.length > maxResults;
-        const nextPageToken = hasMoreResults
-          ? shardResults.find((r) => r.nextPageToken)?.nextPageToken || null
-          : null;
-
-        return {
-          threads,
-          nextPageToken,
-        };
-      },
+      (shardResults) => mergeThreadCachePages(shardResults, maxResults),
     ),
   );
 };
@@ -464,15 +425,8 @@ export const getDatabaseSize = async (connectionId: string): Promise<number> => 
 };
 
 export const deleteAllSpam = async (connectionId: string) => {
-  return Effect.runPromise(
-    aggregateShardDataEffect<{ deletedCount: number }>(
-      connectionId,
-      (shard) => Effect.promise(() => shard.stub.deleteAllSpam()),
-      (results) => ({
-        deletedCount: results.reduce((total, result) => total + result.deletedCount, 0),
-      }),
-    ),
-  );
+  const agent = await getZeroAgent(connectionId);
+  return agent.stub.deleteAllSpam();
 };
 
 type CountResult = { label: string; count: number };
@@ -493,6 +447,24 @@ const getCounts = async (connectionId: string): Promise<CountResult[]> => {
   return Array.from(countMap, ([label, count]) => ({ label, count }));
 };
 
+const getInboxCount = async (connectionId: string): Promise<number | undefined> => {
+  try {
+    return await cachedInboxThreadCount(connectionId, env.gmail_processing_threads, async () => {
+      const { db } = createDb(env.DB);
+      const mailbox = await db.query.connection.findFirst({
+        where: eq(connection.id, connectionId),
+      });
+      if (!mailbox) throw new Error('Mailbox is unavailable');
+      const driver = connectionToDriver(mailbox);
+      if (!driver.getInboxCount) throw new Error('Inbox total is unavailable');
+      return driver.getInboxCount();
+    });
+  } catch {
+    console.error('[sendDoState] Gmail inbox total is unavailable');
+    return undefined;
+  }
+};
+
 /**
  * Cannot be called by a shard, can only be called by the Worker
  * @param connectionId
@@ -502,7 +474,10 @@ export const sendDoState = async (connectionId: string) => {
   try {
     const agent = await getZeroSocketAgent(connectionId);
 
-    const cached = await agent.getCachedDoState();
+    const [cached, inboxCount] = await Promise.all([
+      agent.getCachedDoState(),
+      getInboxCount(connectionId),
+    ]);
     if (cached) {
       console.log(`[sendDoState] Using cached data for connection ${connectionId}`);
       return agent.broadcastChatMessage({
@@ -510,7 +485,7 @@ export const sendDoState = async (connectionId: string) => {
         isSyncing: false,
         syncingFolders: ['inbox'],
         storageSize: cached.storageSize,
-        counts: cached.counts,
+        counts: replaceInboxCount(cached.counts, inboxCount),
         shards: cached.shards,
       });
     }
@@ -530,7 +505,7 @@ export const sendDoState = async (connectionId: string) => {
       isSyncing: false,
       syncingFolders: ['inbox'],
       storageSize: size,
-      counts,
+      counts: replaceInboxCount(counts, inboxCount),
       shards: shards.length,
     });
   } catch (error) {
@@ -545,7 +520,7 @@ export const getZeroSocketAgent = async (connectionId: string) => {
 
 export const getActiveConnection = async () => {
   const c = getContext<HonoContext>();
-  const { sessionUser, auth } = c.var;
+  const { sessionUser } = c.var;
   if (!sessionUser) throw new Error('Session Not Found');
 
   const db = await getZeroDB(sessionUser.id);
@@ -557,18 +532,7 @@ export const getActiveConnection = async () => {
   }
 
   const firstConnection = await db.findFirstConnection();
-  if (!firstConnection) {
-    try {
-      if (auth) {
-        await auth.api.revokeSession({ headers: c.req.raw.headers });
-        await auth.api.signOut({ headers: c.req.raw.headers });
-      }
-    } catch (err) {
-      console.warn(`[getActiveConnection] Session cleanup failed for user ${sessionUser.id}:`, err);
-    }
-    console.error(`No connections found for user ${sessionUser.id}`);
-    throw new Error('No connections found for user');
-  }
+  if (!firstConnection) throw new Error('Connect an email account to open your mailbox');
 
   return firstConnection;
 };
@@ -607,7 +571,7 @@ export const verifyToken = async (token: string) => {
 
 
 export const resetConnection = async (connectionId: string) => {
-  const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
+  const { db } = createDb(env.DB);
   await db
     .update(connection)
     .set({
@@ -615,5 +579,5 @@ export const resetConnection = async (connectionId: string) => {
       refreshToken: null,
     })
     .where(eq(connection.id, connectionId));
-  await conn.end();
+
 };

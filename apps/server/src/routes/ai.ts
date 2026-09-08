@@ -1,5 +1,5 @@
 import { systemPrompt } from '../services/call-service/system-prompt';
-import { openai } from '@ai-sdk/openai';
+import { getAIModel } from '../lib/ai-model';
 import { tools } from './agent/tools';
 import { generateText } from 'ai';
 import { Tools } from '../types';
@@ -31,7 +31,7 @@ aiRouter.post('/do/:action', async (c) => {
     return c.json({ success: false, error: 'Unauthorized' }, 401);
   const caller = c.req.header('X-Caller');
   if (!caller) return c.json({ success: false, error: 'Unauthorized' }, 401);
-  const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
+  const { db } = createDb(env.DB);
   const user = await db.query.user.findFirst({
     where: (user, { eq, and }) =>
       and(eq(user.phoneNumber, caller), eq(user.phoneNumberVerified, true)),
@@ -42,7 +42,7 @@ aiRouter.post('/do/:action', async (c) => {
     where: (connection, { eq, or }) =>
       or(eq(connection.id, user.defaultConnectionId!), eq(connection.userId, user.id)),
   });
-  await conn.end();
+
   if (!connection) return c.json({ success: false, error: 'Unauthorized' }, 401);
 
   try {
@@ -100,7 +100,7 @@ aiRouter.post('/call', async (c) => {
   }
 
   console.log('[DEBUG] Connecting to database');
-  const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
+  const { db } = createDb(env.DB);
 
   console.log('[DEBUG] Finding user by phone number:', c.req.header('X-Caller'));
   const user = await db.query.user.findFirst({
@@ -119,7 +119,6 @@ aiRouter.post('/call', async (c) => {
       or(eq(connection.id, user.defaultConnectionId!), eq(connection.userId, user.id)),
   });
 
-  await conn.end();
 
   if (!connection) {
     console.log('[DEBUG] No connection found for user');
@@ -129,7 +128,7 @@ aiRouter.post('/call', async (c) => {
   console.log('[DEBUG] Creating toolset for connection:', connection.id);
   const toolset = await tools(connection.id);
   const { text } = await generateText({
-    model: openai(env.OPENAI_MODEL || 'gpt-4o'),
+    model: getAIModel(env),
     system: systemPrompt,
     prompt: data.query,
     tools: toolset,

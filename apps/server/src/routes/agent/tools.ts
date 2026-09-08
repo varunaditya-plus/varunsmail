@@ -2,39 +2,17 @@ import { getCurrentDateContext, GmailSearchAssistantSystemPrompt } from '../../l
 import { getThread, getZeroAgent } from '../../lib/server-utils';
 import type { IGetThreadResponse } from '../../lib/driver/types';
 import { composeEmail } from '../../trpc/routes/ai/compose';
-import { perplexity } from '@ai-sdk/perplexity';
 import { colors } from '../../lib/prompts';
-import { openai } from '@ai-sdk/openai';
+import { getAIModel, getWebSearchOptions, summarizeText } from '../../lib/ai-model';
 import { generateText, tool } from 'ai';
 import { Tools } from '../../types';
 import { env } from '../../env';
 import { z } from 'zod';
 
-type ModelTypes = 'summarize' | 'general' | 'chat' | 'vectorize';
-
-const models: Record<ModelTypes, any> = {
-  summarize: '@cf/facebook/bart-large-cnn',
-  general: 'llama-3.3-70b-instruct-fp8-fast',
-  chat: '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
-  vectorize: '@cf/baai/bge-large-en-v1.5',
-};
-
-export const getEmbeddingVector = async (
-  text: string,
-  gatewayId: 'vectorize-save' | 'vectorize-load',
-) => {
+export const getEmbeddingVector = async (text: string) => {
   try {
-    const embeddingResponse = await env.AI.run(
-      models.vectorize,
-      { text },
-      {
-        gateway: {
-          id: gatewayId,
-        },
-      },
-    );
-    const embeddingVector = embeddingResponse.data[0];
-    return embeddingVector ?? null;
+    const embeddingResponse = await env.AI.run('@cf/baai/bge-large-en-v1.5', { text });
+    return 'data' in embeddingResponse ? embeddingResponse.data?.[0] ?? null : null;
   } catch (error) {
     console.log('[getEmbeddingVector] failed', error);
     return null;
@@ -49,7 +27,7 @@ export const getEmbeddingVector = async (
 //       topK: z.number().describe('The number of results to return').max(9).min(1).default(3),
 //     }),
 //     execute: async ({ question, topK = 3 }) => {
-//       const embedding = await getEmbeddingVector(question, 'vectorize-load');
+//       const embedding = await getEmbeddingVector(question);
 //       if (!embedding) {
 //         return { error: 'Failed to get embedding' };
 //       }
@@ -84,7 +62,7 @@ export const getEmbeddingVector = async (
 //     execute: async ({ threadId, question }) => {
 //       const response = await env.VECTORIZE.getByIds([threadId]);
 //       if (!response.length) return { response: "I don't know, no threads found", success: false };
-//       const embedding = await getEmbeddingVector(question, 'vectorize-load');
+//       const embedding = await getEmbeddingVector(question);
 //       if (!embedding) {
 //         return { error: 'Failed to get embedding' };
 //       }
@@ -146,11 +124,9 @@ const getThreadSummary = (connectionId: string) =>
         if (result.connection !== connectionId) {
           return null;
         }
-        const shortResponse = await env.AI.run('@cf/facebook/bart-large-cnn', {
-          input_text: result.summary,
-        });
+        const shortSummary = await summarizeText(result.summary, env);
         return {
-          short: shortResponse.summary,
+          short: shortSummary,
           subject: thread.latest?.subject,
           sender: thread.latest?.sender,
           date: thread.latest?.receivedOn,
@@ -419,7 +395,7 @@ const buildGmailSearchQuery = () =>
       console.log('[DEBUG] buildGmailSearchQuery', params);
 
       const result = await generateText({
-        model: openai(env.OPENAI_MODEL || 'gpt-4o'),
+        model: getAIModel(env),
         system: GmailSearchAssistantSystemPrompt(),
         prompt: params.query,
       });
@@ -454,18 +430,17 @@ const getCurrentDate = () =>
 
 export const webSearch = () =>
   tool({
-    description: 'Search the web for information using Perplexity AI',
+    description: 'Search the web for current information',
     parameters: z.object({
       query: z.string().describe('The query to search the web for'),
     }),
     execute: async ({ query }) => {
       try {
         const response = await generateText({
-          model: perplexity('sonar'),
+          ...getWebSearchOptions(env),
           messages: [
             { role: 'system', content: 'Be precise and concise.' },
-            { role: 'system', content: 'Do not include sources in your response.' },
-            { role: 'system', content: 'Do not use markdown formatting in your response.' },
+            { role: 'system', content: 'Include inline links to sources supporting your answer.' },
             { role: 'user', content: query },
           ],
           maxTokens: 1024,

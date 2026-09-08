@@ -15,16 +15,7 @@ export interface ProviderConfig {
   customRedirectPath?: string;
 }
 
-export const customProviders: ProviderConfig[] = [
-  // {
-  //   id: "zero",
-  //   name: "Zero",
-  //   requiredEnvVars: [],
-  //   config: {},
-  //   isCustom: true,
-  //   customRedirectPath: "/zero/signup"
-  // }
-];
+export const customProviders: ProviderConfig[] = [];
 
 export const authProviders = (env: Record<string, string>): ProviderConfig[] => [
   {
@@ -36,7 +27,8 @@ export const authProviders = (env: Record<string, string>): ProviderConfig[] => 
       { name: 'GOOGLE_CLIENT_SECRET', source: 'Google Cloud Console' },
     ],
     config: {
-      prompt: env.FORCE_GOOGLE_AUTH ? 'consent' : undefined,
+      prompt: 'select_account consent',
+      disableSignUp: true,
       accessType: 'offline',
       scope: [
         'https://mail.google.com/',
@@ -47,7 +39,7 @@ export const authProviders = (env: Record<string, string>): ProviderConfig[] => 
       clientId: env.GOOGLE_CLIENT_ID,
       clientSecret: env.GOOGLE_CLIENT_SECRET,
     },
-    required: true,
+    required: false,
   },
   //   {
   //     id: 'microsoft',

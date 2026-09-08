@@ -15,7 +15,7 @@
  */
 
 import { generateObject } from 'ai';
-import { openai } from '@ai-sdk/openai';
+import { getAIModel } from '../ai-model';
 import { z } from 'zod';
 import { env } from 'cloudflare:workers';
 
@@ -91,7 +91,7 @@ ${sample.join('\n')}`;
 
   try {
     const { object } = await generateObject({
-      model: openai(env.OPENAI_MODEL || 'gpt-4o-mini'),
+      model: getAIModel(env, true),
       schema,
       system: systemPrompt,
       prompt: userPrompt,

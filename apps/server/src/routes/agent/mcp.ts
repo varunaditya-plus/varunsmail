@@ -1,3 +1,4 @@
+import { summarizeText } from '../../lib/ai-model';
 /*
  * Licensed to Zero Email Inc. under one or more contributor license agreements.
  * You may not use this file except in compliance with the Apache License, Version 2.0 (the "License").
@@ -37,7 +38,7 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
 
   async init(): Promise<void> {
     if (!this.props.userId) return;
-    const { db, conn } = createDb(env.HYPERDRIVE.connectionString);
+    const { db } = createDb(env.DB);
     const _connection = await db.query.connection.findFirst({
       where: eq(connection.userId, this.props.userId),
     });
@@ -98,14 +99,12 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
               ],
             };
           }
-          const shortResponse = await env.AI.run('@cf/facebook/bart-large-cnn', {
-            input_text: result.summary,
-          });
+          const shortSummary = await summarizeText(result.summary, env);
           return {
             content: [
               {
                 type: 'text' as const,
-                text: shortResponse.summary as string,
+                text: shortSummary,
               },
               {
                 type: 'text' as const,
@@ -568,6 +567,6 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
         }
       },
     );
-    this.ctx.waitUntil(conn.end());
+
   }
 }

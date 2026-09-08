@@ -63,8 +63,8 @@ export interface MailManager {
     }[]
   >;
   get(id: string): Promise<IGetThreadResponse>;
-  create(data: IOutgoingMessage): Promise<{ id?: string | null }>;
-  sendDraft(id: string, data: IOutgoingMessage): Promise<void>;
+  create(data: IOutgoingMessage): Promise<{ id?: string | null; threadId?: string | null }>;
+  sendDraft(id: string, data: IOutgoingMessage): Promise<{ id?: string | null; threadId?: string | null } | void>;
   createDraft(
     data: CreateDraftData,
   ): Promise<{ id?: string | null; success?: boolean; error?: string }>;
@@ -86,6 +86,7 @@ export interface MailManager {
     nextPageToken: string | null;
   }>;
   count(): Promise<{ count?: number; label?: string }[]>;
+  getInboxCount?(): Promise<number>;
   getTokens(
     code: string,
   ): Promise<{ tokens: { access_token?: string; refresh_token?: string; expiry_date?: number } }>;

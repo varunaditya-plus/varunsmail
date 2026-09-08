@@ -1,3 +1,4 @@
+import { summarizeText } from '../../lib/ai-model';
 import { disableBrainFunction, getPrompts } from '../../lib/brain';
 import { EProviders, EPrompts, type ISubscribeBatch } from '../../types';
 import { activeConnectionProcedure, router } from '../trpc';
@@ -40,12 +41,10 @@ export const brainRouter = router({
       if (response.length && response?.[0]?.metadata?.['summary']) {
         const result = response[0].metadata as { summary: string; connection: string };
         if (result.connection !== ctx.activeConnection.id) return null;
-        const shortResponse = await env.AI.run('@cf/facebook/bart-large-cnn', {
-          input_text: result.summary,
-        });
+        const shortSummary = await summarizeText(result.summary, env);
         return {
           data: {
-            short: shortResponse.summary,
+            short: shortSummary,
           },
         };
       }

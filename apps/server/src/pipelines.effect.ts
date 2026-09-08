@@ -106,17 +106,10 @@ export const getEmbeddingVector = async (text: string) => {
       return null;
     }
 
-    const embeddingResponse = await env.AI.run(
-      '@cf/baai/bge-large-en-v1.5',
-      { text: text.trim() },
-      {
-        gateway: {
-          id: 'vectorize-save',
-        },
-      },
-    );
-    const embeddingVector = (embeddingResponse as any).data?.[0];
-    return embeddingVector ?? null;
+    const embeddingResponse = await env.AI.run('@cf/baai/bge-large-en-v1.5', {
+      text: text.trim(),
+    });
+    return 'data' in embeddingResponse ? embeddingResponse.data?.[0] ?? null : null;
   } catch (error) {
     log('[getEmbeddingVector] failed', error);
     return null;
