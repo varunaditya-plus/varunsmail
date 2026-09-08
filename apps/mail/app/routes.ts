@@ -2,18 +2,7 @@ import { type RouteConfig, index, layout, prefix, route } from '@react-router/de
 
 export default [
   index('page.tsx'),
-  route('/home', 'home/page.tsx'),
-
   route('/api/mailto-handler', 'mailto-handler.ts'),
-
-  layout('(full-width)/layout.tsx', [
-    route('/about', '(full-width)/about.tsx'),
-    route('/terms', '(full-width)/terms.tsx'),
-    route('/pricing', '(full-width)/pricing.tsx'),
-    route('/privacy', '(full-width)/privacy.tsx'),
-    route('/contributors', '(full-width)/contributors.tsx'),
-    route('/hr', '(full-width)/hr.tsx'),
-  ]),
 
   route('/login', '(auth)/login/page.tsx'),
 
