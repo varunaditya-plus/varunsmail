@@ -66,7 +66,7 @@
     },
     "commandPalette": {
       "title": "コマンド パレット",
-      "description": "Mail-0のクイックナビゲーションとアクション",
+      "description": "Mailのクイックナビゲーションとアクション",
       "placeholder": "コマンドを入力するか検索...",
       "noResults": "何も見つかりませんでした",
       "groups": {
@@ -478,7 +478,7 @@
       },
       "connections": {
         "title": "メールの接続",
-        "description": "メールアカウントをZeroに接続します。",
+        "description": "メールアカウントをMailに接続します。",
         "disconnectTitle": "メールアカウントを切断する",
         "disconnectDescription": "このメールアドレスを切断してもよろしいですか？",
         "cancel": "キャンセル",
@@ -611,7 +611,7 @@
     "createEmail": {
       "invalidEmail": "無効なメールアドレスです",
       "body": "本文",
-      "example": "zero@0.email",
+      "example": "name@example.com",
       "attachments": "添付ファイル",
       "addMore": "さらに追加",
       "dropFilesToAttach": "添付するファイルをドロップ",
@@ -666,6 +666,6 @@
   "errorMessages": {
     "required_scopes_missing": "完全な体験を提供するために必要な権限が不足しています。もう一度サインインして、リクエストされたアクセスを許可してください。",
     "early_access_required": "ログインするにはアーリーアクセスが必要です",
-    "unauthorized": "Zeroは第三者プロバイダーからデータを読み込めませんでした。もう一度お試しください。"
+    "unauthorized": "Mailは第三者プロバイダーからデータを読み込めませんでした。もう一度お試しください。"
   }
 }

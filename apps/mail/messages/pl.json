@@ -66,7 +66,7 @@
     },
     "commandPalette": {
       "title": "Paleta poleceń",
-      "description": "Szybka nawigacja i akcje dla Mail-0",
+      "description": "Szybka nawigacja i akcje dla Mail",
       "placeholder": "Wpisz polecenie lub szukaj...",
       "noResults": "Nie znaleziono wyników",
       "groups": {
@@ -478,7 +478,7 @@
       },
       "connections": {
         "title": "Połączenia e-mail",
-        "description": "Połącz swoje konta e-mail z Zero.",
+        "description": "Połącz swoje konta e-mail z Mail.",
         "disconnectTitle": "Odłącz konto e-mail",
         "disconnectDescription": "Czy na pewno chcesz odłączyć ten e-mail?",
         "cancel": "Anuluj",
@@ -611,7 +611,7 @@
     "createEmail": {
       "invalidEmail": "Nieprawidłowy adres e-mail",
       "body": "Treść",
-      "example": "zero@0.email",
+      "example": "name@example.com",
       "attachments": "Załączniki ({count})",
       "addMore": "Dodaj więcej",
       "dropFilesToAttach": "Upuść pliki, aby załączyć",
@@ -666,6 +666,6 @@
   "errorMessages": {
     "required_scopes_missing": "Brakuje nam uprawnień potrzebnych do zapewnienia pełnego doświadczenia. Zaloguj się ponownie i zaakceptuj wymagane uprawnienia.",
     "early_access_required": "Wymagany jest wczesny dostęp, aby się zalogować",
-    "unauthorized": "Zero nie mógł załadować Twoich danych od zewnętrznego dostawcy. Spróbuj ponownie."
+    "unauthorized": "Mail nie mógł załadować Twoich danych od zewnętrznego dostawcy. Spróbuj ponownie."
   }
 }

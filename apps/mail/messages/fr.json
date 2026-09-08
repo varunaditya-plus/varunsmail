@@ -66,7 +66,7 @@
     },
     "commandPalette": {
       "title": "Palette de commandes",
-      "description": "Navigation rapide et actions pour Mail-0",
+      "description": "Navigation rapide et actions pour Mail",
       "placeholder": "Tapez une commande ou recherchez...",
       "noResults": "Aucun résultat trouvé",
       "groups": {
@@ -478,7 +478,7 @@
       },
       "connections": {
         "title": "Connexions de courriels",
-        "description": "Connectez vos adresses courriel à Zero.",
+        "description": "Connectez vos adresses courriel à Mail.",
         "disconnectTitle": "Déconnecter l'adresse courriel",
         "disconnectDescription": "Êtes-vous sûr de vouloir déconnecter ce courriel?",
         "cancel": "Annuler",
@@ -611,7 +611,7 @@
     "createEmail": {
       "invalidEmail": "Adresse e-mail invalide",
       "body": "Corps",
-      "example": "zero@0.email",
+      "example": "name@example.com",
       "attachments": "Pièces jointes",
       "addMore": "Ajouter plus",
       "dropFilesToAttach": "Déposez des fichiers pour les joindre",
@@ -666,6 +666,6 @@
   "errorMessages": {
     "required_scopes_missing": "Il nous manque les autorisations nécessaires pour créer votre expérience complète. Veuillez vous reconnecter et autoriser l'accès demandé.",
     "early_access_required": "L'accès anticipé est requis pour se connecter",
-    "unauthorized": "Zero n'a pas pu charger vos données depuis le fournisseur tiers. Veuillez réessayer."
+    "unauthorized": "Mail n'a pas pu charger vos données depuis le fournisseur tiers. Veuillez réessayer."
   }
 }

@@ -66,7 +66,7 @@
     },
     "commandPalette": {
       "title": "Parancspaletta",
-      "description": "Gyors navigáció és műveletek a Mail-0 számára",
+      "description": "Gyors navigáció és műveletek a Mail számára",
       "placeholder": "Írj be egy parancsot vagy keress...",
       "noResults": "Nincs találat",
       "groups": {
@@ -478,7 +478,7 @@
       },
       "connections": {
         "title": "E-mail kapcsolatok",
-        "description": "Kapcsold össze e-mail fiókjaidat a Zero-val.",
+        "description": "Kapcsold össze e-mail fiókjaidat a Mail-val.",
         "disconnectTitle": "E-mail fiók leválasztása",
         "disconnectDescription": "Biztosan le szeretnéd választani ezt az e-mail fiókot?",
         "cancel": "Mégsem",
@@ -611,7 +611,7 @@
     "createEmail": {
       "invalidEmail": "Érvénytelen e-mail cím",
       "body": "Törzs",
-      "example": "zero@0.email",
+      "example": "name@example.com",
       "attachments": "Mellékletek ({count})",
       "addMore": "További hozzáadása",
       "dropFilesToAttach": "Húzza ide a fájlokat a csatoláshoz",
@@ -666,6 +666,6 @@
   "errorMessages": {
     "required_scopes_missing": "Hiányoznak a teljes élményhez szükséges engedélyek. Kérjük, jelentkezz be újra és engedélyezd a kért hozzáféréseket.",
     "early_access_required": "A bejelentkezéshez korai hozzáférés szükséges",
-    "unauthorized": "A Zero nem tudta betölteni az adataidat a harmadik féltől származó szolgáltatótól. Kérjük, próbáld újra."
+    "unauthorized": "A Mail nem tudta betölteni az adataidat a harmadik féltől származó szolgáltatótól. Kérjük, próbáld újra."
   }
 }

@@ -66,7 +66,7 @@
     },
     "commandPalette": {
       "title": "پالت فرمان",
-      "description": "ناوبری سریع و اقدامات برای Zero Email",
+      "description": "ناوبری سریع و اقدامات برای Mail",
       "placeholder": "یک دستور را تایپ کنید یا جستجو کنید...",
       "noResults": "نتیجه‌ای یافت نشد",
       "groups": {
@@ -478,7 +478,7 @@
       },
       "connections": {
         "title": "اتصالات ایمیل",
-        "description": "حساب‌های ایمیل خود را به Zero متصل کنید.",
+        "description": "حساب‌های ایمیل خود را به Mail متصل کنید.",
         "disconnectTitle": "قطع اتصال حساب ایمیل",
         "disconnectDescription": "آیا مطمئن هستید که می‌خواهید اتصال این ایمیل را قطع کنید؟",
         "cancel": "لغو",
@@ -611,7 +611,7 @@
     "createEmail": {
       "invalidEmail": "آدرس ایمیل نامعتبر است",
       "body": "متن",
-      "example": "zero@0.email",
+      "example": "name@example.com",
       "attachments": "پیوست‌ها ({count})",
       "addMore": "افزودن بیشتر",
       "dropFilesToAttach": "فایل‌ها را برای پیوست کردن اینجا رها کنید",
@@ -666,6 +666,6 @@
   "errorMessages": {
     "required_scopes_missing": "دسترسی‌های لازم برای ارائه تجربه کامل به شما وجود ندارد. لطفاً دوباره وارد شوید و دسترسی‌های درخواست شده را تأیید کنید.",
     "early_access_required": "برای ورود به سیستم، دسترسی زودهنگام لازم است",
-    "unauthorized": "Zero نتوانست داده‌های شما را از ارائه‌دهنده شخص ثالث بارگیری کند. لطفاً دوباره تلاش کنید."
+    "unauthorized": "Mail نتوانست داده‌های شما را از ارائه‌دهنده شخص ثالث بارگیری کند. لطفاً دوباره تلاش کنید."
   }
 }

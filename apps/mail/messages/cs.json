@@ -66,7 +66,7 @@
     },
     "commandPalette": {
       "title": "Paleta příkazů",
-      "description": "Rychlá navigace a akce v Mail-0",
+      "description": "Rychlá navigace a akce v Mail",
       "placeholder": "Napište příkaz nebo vyhledejte...",
       "noResults": "Nebyly nalezeny žádné výsledky",
       "groups": {
@@ -478,7 +478,7 @@
       },
       "connections": {
         "title": "Propojení emailu",
-        "description": "Propojit emailový účet k Zero.",
+        "description": "Propojit emailový účet k Mail.",
         "disconnectTitle": "Odpojit emailový účet",
         "disconnectDescription": "Opravdu chcete odpojit tento email?",
         "cancel": "Zrušit",
@@ -611,7 +611,7 @@
     "createEmail": {
       "invalidEmail": "Neplatná e-mailová adresa",
       "body": "Tělo",
-      "example": "nula@0.email",
+      "example": "name@example.com",
       "attachments": "Přílohy",
       "addMore": "Přidat další",
       "dropFilesToAttach": "Přetáhněte sem soubory",
@@ -666,6 +666,6 @@
   "errorMessages": {
     "required_scopes_missing": "Chybí nám oprávnění potřebná k vytvoření plnohodnotného zážitku. Přihlaste se prosím znovu a povolte požadovaný přístup.",
     "early_access_required": "Pro přihlášení je vyžadován předběžný přístup",
-    "unauthorized": "Zero nemohl načíst vaše data od poskytovatele třetí strany. Zkuste to prosím znovu."
+    "unauthorized": "Mail nemohl načíst vaše data od poskytovatele třetí strany. Zkuste to prosím znovu."
   }
 }

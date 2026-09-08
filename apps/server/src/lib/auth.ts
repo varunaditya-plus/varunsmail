@@ -92,7 +92,7 @@ const connectionHandlerHook = async (account: Account) => {
   if (!account.accessToken || !account.refreshToken) {
     console.error('Missing Access/Refresh Tokens', { account });
     throw new APIError('EXPECTATION_FAILED', {
-      message: 'Missing Access/Refresh Tokens, contact us on Discord for support',
+      message: 'Missing access or refresh tokens. Reconnect the account and allow the requested permissions.',
     });
   }
 

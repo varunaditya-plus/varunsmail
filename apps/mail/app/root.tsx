@@ -46,7 +46,6 @@ export const meta: MetaFunction = () => {
     { name: 'description', content: siteConfig.description },
     { property: 'og:title', content: siteConfig.title },
     { property: 'og:description', content: siteConfig.description },
-    { property: 'og:image', content: siteConfig.openGraph.images[0].url },
     { property: 'og:url', content: siteConfig.alternates.canonical },
     { property: 'og:type', content: 'website' },
     { rel: 'manifest', href: '/manifest.webmanifest' },
@@ -73,7 +72,7 @@ export function Layout({ children }: PropsWithChildren) {
           <ClientProviders>{children}</ClientProviders>
           <DubAnalytics
             domainsConfig={{
-              refer: 'mail0.com',
+              refer: 'mail.varunaditya.space',
             }}
           />
         </ServerProviders>

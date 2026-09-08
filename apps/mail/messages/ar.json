@@ -66,7 +66,7 @@
     },
     "commandPalette": {
       "title": "لوحة الأوامر",
-      "description": "التنقل السريع والإجراءات لـ Mail-0",
+      "description": "التنقل السريع والإجراءات لـ Mail",
       "placeholder": "اكتب أمرًا أو ابحث...",
       "noResults": "لم يتم العثور على نتائج",
       "groups": {
@@ -478,7 +478,7 @@
       },
       "connections": {
         "title": "اتصالات البريد الإلكتروني",
-        "description": "قم بربط حسابات بريدك الإلكتروني بـ Zero.",
+        "description": "قم بربط حسابات بريدك الإلكتروني بـ Mail.",
         "disconnectTitle": "فصل حساب البريد الإلكتروني",
         "disconnectDescription": "هل أنت متأكد من رغبتك في فصل هذا البريد الإلكتروني؟",
         "cancel": "إلغاء",
@@ -611,7 +611,7 @@
     "createEmail": {
       "invalidEmail": "عنوان البريد الإلكتروني غير صالح",
       "body": "المحتوى",
-      "example": "zero@0.email",
+      "example": "name@example.com",
       "attachments": "المرفقات ({count})",
       "addMore": "إضافة المزيد",
       "dropFilesToAttach": "أسقط الملفات لإرفاقها",
@@ -666,6 +666,6 @@
   "errorMessages": {
     "required_scopes_missing": "تنقصنا الأذونات اللازمة لإنشاء تجربتك الكاملة. يرجى تسجيل الدخول مرة أخرى والسماح بالوصول المطلوب.",
     "early_access_required": "الوصول المبكر مطلوب لتسجيل الدخول",
-    "unauthorized": "لم يتمكن Zero من تحميل بياناتك من مزود الطرف الثالث. يرجى المحاولة مرة أخرى."
+    "unauthorized": "لم يتمكن Mail من تحميل بياناتك من مزود الطرف الثالث. يرجى المحاولة مرة أخرى."
   }
 }

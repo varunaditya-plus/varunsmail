@@ -1,7 +1,7 @@
 {
-  "name": "Zero",
-  "short_name": "0",
-  "description": "Zero - the first open source email app that puts your privacy and safety first.",
+  "name": "Varun's Mail",
+  "short_name": "Mail",
+  "description": "Varun's private mail client.",
   "scope": "/",
   "start_url": "/mail/inbox",
   "display": "standalone",

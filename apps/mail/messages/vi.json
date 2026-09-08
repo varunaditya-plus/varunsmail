@@ -66,7 +66,7 @@
     },
     "commandPalette": {
       "title": "Bảng lệnh",
-      "description": "Điều hướng nhanh và thao tác cho Zero Email",
+      "description": "Điều hướng nhanh và thao tác cho Mail",
       "placeholder": "Nhập lệnh hoặc tìm kiếm...",
       "noResults": "Không tìm thấy kết quả nào",
       "groups": {
@@ -478,7 +478,7 @@
       },
       "connections": {
         "title": "Kết nối email",
-        "description": "Kết nối tài khoản email của bạn với Zero.",
+        "description": "Kết nối tài khoản email của bạn với Mail.",
         "disconnectTitle": "Ngắt kết nối tài khoản email",
         "disconnectDescription": "Bạn có chắc chắn muốn ngắt kết nối email này không?",
         "cancel": "Hủy",
@@ -611,7 +611,7 @@
     "createEmail": {
       "invalidEmail": "Địa chỉ email không hợp lệ",
       "body": "Nội dung",
-      "example": "zero@0.email",
+      "example": "name@example.com",
       "attachments": "Tệp đính kèm ({count})",
       "addMore": "Thêm nữa",
       "dropFilesToAttach": "Kéo thả tệp để đính kèm",
@@ -666,6 +666,6 @@
   "errorMessages": {
     "required_scopes_missing": "Chúng tôi thiếu các quyền cần thiết để tạo trải nghiệm đầy đủ cho bạn. Vui lòng đăng nhập lại và cho phép quyền truy cập được yêu cầu.",
     "early_access_required": "Cần có quyền truy cập sớm để đăng nhập",
-    "unauthorized": "Zero không thể tải dữ liệu của bạn từ nhà cung cấp bên thứ 3. Vui lòng thử lại."
+    "unauthorized": "Mail không thể tải dữ liệu của bạn từ nhà cung cấp bên thứ 3. Vui lòng thử lại."
   }
 }
