@@ -113,11 +113,11 @@ export const createAuth = () => {
           const verificationUrl = data.url;
 
           await resend().emails.send({
-            from: '0.email <no-reply@0.email>',
+            from: "Varun's Mail <no-reply@mail.varunaditya.space>",
             to: data.user.email,
-            subject: 'Delete your 0.email account',
+            subject: 'Delete your mail account',
             html: `
-            <h2>Delete Your 0.email Account</h2>
+            <h2>Delete Your Mail Account</h2>
             <p>Click the link below to delete your account:</p>
             <a href="${verificationUrl}">${verificationUrl}</a>
           `,
@@ -185,7 +185,7 @@ export const createAuth = () => {
       requireEmailVerification: true,
       sendResetPassword: async ({ user, url }) => {
         await resend().emails.send({
-          from: '0.email <onboarding@0.email>',
+          from: "Varun's Mail <no-reply@mail.varunaditya.space>",
           to: user.email,
           subject: 'Reset your password',
           html: `
@@ -204,11 +204,11 @@ export const createAuth = () => {
         const verificationUrl = `${env.VITE_PUBLIC_APP_URL}/api/auth/verify-email?token=${token}&callbackURL=/settings/connections`;
 
         await resend().emails.send({
-          from: '0.email <onboarding@0.email>',
+          from: "Varun's Mail <no-reply@mail.varunaditya.space>",
           to: user.email,
-          subject: 'Verify your 0.email account',
+          subject: 'Verify your mail account',
           html: `
-            <h2>Verify Your 0.email Account</h2>
+            <h2>Verify Your Mail Account</h2>
             <p>Click the link below to verify your email:</p>
             <a href="${verificationUrl}">${verificationUrl}</a>
           `,
@@ -277,13 +277,7 @@ const createAuthConfig = () => {
       },
     },
     baseURL: env.VITE_PUBLIC_BACKEND_URL,
-    trustedOrigins: [
-      'https://app.0.email',
-      'https://sapi.0.email',
-      'https://staging.0.email',
-      'https://0.email',
-      'http://localhost:3000',
-    ],
+    trustedOrigins: [env.VITE_PUBLIC_APP_URL, 'http://localhost:3000'],
     session: {
       cookieCache: {
         enabled: true,
