@@ -1,6 +1,7 @@
 import { Tooltip, TooltipTrigger, TooltipContent } from './ui/tooltip';
 import { useAISidebar } from './ui/ai-sidebar';
 import { Button } from './ui/button';
+import { Sparkles } from 'lucide-react';
 
 // AI Toggle Button Component
 const AIToggleButton = () => {
@@ -22,22 +23,7 @@ const AIToggleButton = () => {
                 }
               }}
             >
-              <div className="flex items-center justify-center">
-                <img
-                  src="/black-icon.svg"
-                  alt="AI Assistant"
-                  width={22}
-                  height={22}
-                  className="block dark:hidden"
-                />
-                <img
-                  src="/white-icon.svg"
-                  alt="AI Assistant"
-                  width={22}
-                  height={22}
-                  className="hidden dark:block"
-                />
-              </div>
+              <Sparkles aria-hidden="true" className="h-[22px] w-[22px]" />
             </Button>
           </TooltipTrigger>
           <TooltipContent>Toggle AI Assistant</TooltipContent>
