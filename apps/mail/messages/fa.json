@@ -466,8 +466,6 @@
         "customPromptPlaceholder": "پرامپت سفارشی خود را برای هوش مصنوعی وارد کنید...",
         "customPromptDescription": "نحوه نگارش پاسخ‌های ایمیل توسط هوش مصنوعی را سفارشی کنید. این به پرامپت پایه اضافه خواهد شد.",
         "noResultsFound": "نتیجه‌ای یافت نشد",
-        "zeroSignature": "امضای Zero",
-        "zeroSignatureDescription": "افزودن امضای Zero به ایمیل‌های شما.",
         "undoSendEnabled": "لغو ارسال",
         "undoSendEnabledDescription": "امکان لغو ایمیل‌ها در مدت ۳۰ ثانیه پس از ارسال.",
         "defaultEmailAlias": "نام مستعار ایمیل پیش‌فرض",

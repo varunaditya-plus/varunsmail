@@ -466,8 +466,6 @@
         "customPromptPlaceholder": "AI를 위한 맞춤 프롬프트를 입력하세요...",
         "customPromptDescription": "AI가 이메일 답장을 작성하는 방식을 맞춤설정하세요. 이것은 기본 프롬프트에 추가됩니다.",
         "noResultsFound": "검색 결과 없음",
-        "zeroSignature": "Zero 서명",
-        "zeroSignatureDescription": "이메일에 Zero 서명을 추가합니다.",
         "undoSendEnabled": "전송 취소",
         "undoSendEnabledDescription": "이메일 전송 후 30초 이내에 취소할 수 있습니다.",
         "defaultEmailAlias": "기본 이메일 별칭",

@@ -466,8 +466,6 @@
         "customPromptPlaceholder": "Entrez votre requête personnalisée pour l'IA...",
         "customPromptDescription": "Personnalisez la façon dont l'IA écrit vos réponses. Cela sera ajouté à la requête par défaut.",
         "noResultsFound": "Aucun résultat trouvé",
-        "zeroSignature": "Signature Zero",
-        "zeroSignatureDescription": "Ajouter une signature Zero à vos courriels.",
         "undoSendEnabled": "Annuler l'envoi",
         "undoSendEnabledDescription": "Permettre d'annuler les emails dans les 30 secondes suivant l'envoi.",
         "defaultEmailAlias": "Alias e-mail par défaut",

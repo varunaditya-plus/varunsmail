@@ -466,8 +466,6 @@
         "customPromptPlaceholder": "Voer je aangepaste prompt in voor de AI...",
         "customPromptDescription": "Pas aan hoe de AI je e-mailantwoorden schrijft. Dit wordt toegevoegd aan de basisprompt.",
         "noResultsFound": "Geen resultaten gevonden",
-        "zeroSignature": "Zero-handtekening",
-        "zeroSignatureDescription": "Voeg een Zero-handtekening toe aan je e-mails.",
         "undoSendEnabled": "Verzenden ongedaan maken",
         "undoSendEnabledDescription": "Sta toe om e-mails binnen 30 seconden na verzending te annuleren.",
         "defaultEmailAlias": "Standaard e-mailalias",

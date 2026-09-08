@@ -466,8 +466,6 @@
         "customPromptPlaceholder": "Wprowadź własne polecenie dla AI...",
         "customPromptDescription": "Dostosuj sposób, w jaki AI pisze odpowiedzi na Twoje e-maile. Zostanie to dodane do podstawowego polecenia.",
         "noResultsFound": "Nie znaleziono wyników",
-        "zeroSignature": "Podpis Zero",
-        "zeroSignatureDescription": "Dodaj podpis Zero do swoich e-maili.",
         "undoSendEnabled": "Cofnij wysyłanie",
         "undoSendEnabledDescription": "Pozwala anulować wysyłanie e-maili w ciągu 30 sekund od ich wysłania.",
         "defaultEmailAlias": "Domyślny alias e-mail",

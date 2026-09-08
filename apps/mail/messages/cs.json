@@ -466,8 +466,6 @@
         "customPromptPlaceholder": "Zadejte vlastní pokyn pro AI...",
         "customPromptDescription": "Přizpůsobte, jak AI píše vaše e-mailové odpovědi. Toto bude přidáno k základnímu pokynu.",
         "noResultsFound": "Nebyly nalezeny žádné výsledky",
-        "zeroSignature": "Zero podpis",
-        "zeroSignatureDescription": "Přidat Zero podpis k vašim emailům.",
         "undoSendEnabled": "Odvolat odeslání",
         "undoSendEnabledDescription": "Umožnit zrušení e-mailů do 30 sekund po odeslání.",
         "defaultEmailAlias": "Výchozí e-mailový alias",

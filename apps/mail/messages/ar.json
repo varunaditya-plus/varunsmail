@@ -466,8 +466,6 @@
         "customPromptPlaceholder": "أدخل توجيهك المخصص للذكاء الاصطناعي...",
         "customPromptDescription": "خصص كيفية كتابة الذكاء الاصطناعي لردود بريدك الإلكتروني. سيتم إضافة هذا إلى التوجيه الأساسي.",
         "noResultsFound": "لم يتم العثور على نتائج",
-        "zeroSignature": "توقيع Zero",
-        "zeroSignatureDescription": "إضافة توقيع Zero إلى رسائل البريد الإلكتروني الخاصة بك.",
         "undoSendEnabled": "التراجع عن الإرسال",
         "undoSendEnabledDescription": "السماح بإلغاء رسائل البريد الإلكتروني خلال 30 ثانية من إرسالها.",
         "defaultEmailAlias": "الاسم المستعار الافتراضي للبريد الإلكتروني",

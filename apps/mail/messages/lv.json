@@ -466,8 +466,6 @@
         "customPromptPlaceholder": "Ievadi savu pielāgoto norādījumu AI...",
         "customPromptDescription": "Pielāgot, kā AI raksta jūsu e-pasta atbildes. Jūsu norādījumi tiks pievienoti AI noklusējuma instrukcijām.",
         "noResultsFound": "Netika atrasts neviens rezultāts",
-        "zeroSignature": "Zero paraksts",
-        "zeroSignatureDescription": "Pievienot Zero parakstu saviem e-pastiem.",
         "undoSendEnabled": "Atsaukt nosūtīšanu",
         "undoSendEnabledDescription": "Ļaut atcelt e-pastus 30 sekunžu laikā pēc nosūtīšanas.",
         "defaultEmailAlias": "Noklusējuma e-pasta aizstājvārds",

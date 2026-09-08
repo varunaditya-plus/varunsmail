@@ -159,21 +159,17 @@ export default function ReplyCompose({ messageId }: ReplyComposeProps) {
           }))
         : undefined;
 
-      const zeroSignature = settings?.settings.zeroSignature
-        ? '<p style="color: #666; font-size: 12px;">Sent via <a href="https://0.email/" style="color: #0066cc; text-decoration: none;">Zero</a></p>'
-        : '';
-
       const emailBody =
         mode === 'forward'
           ? constructForwardBody(
-              data.message + zeroSignature,
+              data.message,
               new Date(replyToMessage.receivedOn || '').toLocaleString(),
               { ...replyToMessage.sender, subject: replyToMessage.subject },
               toRecipients,
               //   replyToMessage.decodedBody,
             )
           : constructReplyBody(
-              data.message + zeroSignature,
+              data.message,
               new Date(replyToMessage.receivedOn || '').toLocaleString(),
               replyToMessage.sender,
               toRecipients,

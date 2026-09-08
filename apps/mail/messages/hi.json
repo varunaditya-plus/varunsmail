@@ -466,8 +466,6 @@
         "customPromptPlaceholder": "AI के लिए अपना कस्टम प्रॉम्प्ट दर्ज करें...",
         "customPromptDescription": "AI आपके ईमेल जवाब कैसे लिखता है, इसे अनुकूलित करें। यह आधार प्रॉम्प्ट में जोड़ा जाएगा।",
         "noResultsFound": "कोई परिणाम नहीं मिला",
-        "zeroSignature": "ज़ीरो सिग्नेचर",
-        "zeroSignatureDescription": "अपने ईमेल में ज़ीरो सिग्नेचर जोड़ें।",
         "undoSendEnabled": "भेजना रद्द करें",
         "undoSendEnabledDescription": "भेजने के 30 सेकंड के भीतर ईमेल रद्द करने की अनुमति दें।",
         "defaultEmailAlias": "डिफ़ॉल्ट ईमेल उपनाम",

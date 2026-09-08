@@ -466,8 +466,6 @@
         "customPromptPlaceholder": "AIのカスタムプロンプトを入力...",
         "customPromptDescription": "AIがメールの返信を書く方法をカスタマイズします。これはベースプロンプトに追加されます。",
         "noResultsFound": "結果が見つかりませんでした",
-        "zeroSignature": "Zero署名",
-        "zeroSignatureDescription": "メールにZero署名を追加します。",
         "undoSendEnabled": "送信取り消し",
         "undoSendEnabledDescription": "メール送信後30秒以内の取り消しを許可します。",
         "defaultEmailAlias": "デフォルトのメールエイリアス",

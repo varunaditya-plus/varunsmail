@@ -466,8 +466,6 @@
         "customPromptPlaceholder": "Digite seu prompt personalizado para a IA...",
         "customPromptDescription": "Personalize como a IA escreve suas respostas de email. Isto será adicionado ao prompt base.",
         "noResultsFound": "Nenhum resultado encontrado",
-        "zeroSignature": "Assinatura Zero",
-        "zeroSignatureDescription": "Adicionar uma assinatura Zero aos seus e-mails.",
         "undoSendEnabled": "Desfazer envio",
         "undoSendEnabledDescription": "Permitir cancelar emails dentro de 30 segundos após o envio.",
         "defaultEmailAlias": "Alias de Email Padrão",

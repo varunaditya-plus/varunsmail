@@ -466,8 +466,6 @@
         "customPromptPlaceholder": "Írd be az egyéni utasításodat az AI számára...",
         "customPromptDescription": "Szabd testre, hogyan írja az AI az e-mail válaszaidat. Ez hozzáadódik az alap utasításhoz.",
         "noResultsFound": "Nincs találat",
-        "zeroSignature": "Zero aláírás",
-        "zeroSignatureDescription": "Zero aláírás hozzáadása az e-mailjeihez.",
         "undoSendEnabled": "Küldés visszavonása",
         "undoSendEnabledDescription": "Lehetővé teszi az e-mailek visszavonását a küldéstől számított 30 másodpercen belül.",
         "defaultEmailAlias": "Alapértelmezett e-mail álnév",
