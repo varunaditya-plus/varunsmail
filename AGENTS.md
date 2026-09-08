@@ -94,6 +94,7 @@ These instructions apply to the entire repository. A more specific `AGENTS.md` m
 - Use `feat`, `fix`, `refactor`, `perf`, `docs`, `test`, `build`, `ci`, or `chore` according to the actual change.
 - Preserve unrelated history and working-tree changes. Do not amend, squash, rebase, force-push, or rewrite commits unless explicitly asked.
 - Do not push or deploy unless the user has requested it or already authorized it for the active task.
+- Commit to the main branch
 
 ## Verification
 
