@@ -14,7 +14,7 @@ import {
 import { toast } from 'sonner';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { FileText, Save, Trash2 } from 'lucide-react';
-import React, { useState, useMemo, useDeferredValue, useCallback } from 'react';
+import React, { useState, useMemo, useDeferredValue, useCallback, useRef } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -24,11 +24,13 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { TRPCClientError } from '@trpc/client';
+import { TEMPLATE_VARIABLES, prepareTemplate } from '@/lib/template-variables';
 
 type EmailTemplate = {
   id: string;
   userId: string;
   name: string;
+  kind?: 'template' | 'snippet';
   subject: string | null;
   body: string | null;
   to: string[] | null;
@@ -47,6 +49,8 @@ interface TemplateButtonProps {
   to: string[];
   cc: string[];
   bcc: string[];
+  senderEmail?: string;
+  senderName?: string;
   setRecipients: (field: RecipientField, value: string[]) => void;
 }
 
@@ -57,19 +61,24 @@ const TemplateButtonComponent: React.FC<TemplateButtonProps> = ({
   to,
   cc,
   bcc,
+  senderEmail,
+  senderName,
   setRecipients,
 }) => {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
-  const { data } = useTemplates();
+  const templatesQuery = useTemplates();
+  const { data } = templatesQuery;
   
-  const templates = (data?.templates ?? []) as EmailTemplate[];
+  const templates = useMemo(() => (data?.templates ?? []) as EmailTemplate[], [data?.templates]);
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const [templateName, setTemplateName] = useState('');
   const [search, setSearch] = useState('');
+  const [saveKind, setSaveKind] = useState<'template' | 'snippet'>('template');
+  const selectionRef = useRef({ from: 0, to: 0 });
 
   const deferredSearch = useDeferredValue(search);
 
@@ -98,19 +107,21 @@ const TemplateButtonComponent: React.FC<TemplateButtonProps> = ({
 
     setIsSaving(true);
     try {
+      const isSnippet = saveKind === 'snippet';
       const normalizedSubject = subject.trim() ? subject : null;
       await createTemplate({
         name: templateName.trim(),
+        kind: saveKind,
         body: editor.getHTML(),
-        to: to.length ? to : undefined,
-        cc: cc.length ? cc : undefined,
-        bcc: bcc.length ? bcc : undefined,
-        ...(normalizedSubject !== null ? { subject: normalizedSubject } : {}),
+        ...(!isSnippet && to.length ? { to } : {}),
+        ...(!isSnippet && cc.length ? { cc } : {}),
+        ...(!isSnippet && bcc.length ? { bcc } : {}),
+        ...(!isSnippet && normalizedSubject !== null ? { subject: normalizedSubject } : {}),
       });
       await queryClient.invalidateQueries({
         queryKey: trpc.templates.list.queryKey(),
       });
-      toast.success('Template saved');
+      toast.success(`${isSnippet ? 'Snippet' : 'Template'} saved`);
       setTemplateName('');
       setSaveDialogOpen(false);
     } catch (error) {
@@ -126,17 +137,42 @@ const TemplateButtonComponent: React.FC<TemplateButtonProps> = ({
 
   const handleApplyTemplate = useCallback((template: EmailTemplate) => {
     if (!editor) return;
-    
-    if (template.subject) setSubject(template.subject);
-    if (template.body) editor.commands.setContent(template.body, false);
+
+    const application = prepareTemplate(template, {
+      recipientEmail: template.to?.[0] ?? to[0],
+      senderEmail,
+      senderName,
+    });
+
+    if (application.insertAtSelection) {
+      if (application.body) {
+        editor
+          .chain()
+          .focus()
+          .setTextSelection(selectionRef.current)
+          .insertContent(application.body)
+          .run();
+      }
+      return;
+    }
+
+    if (application.subject) setSubject(application.subject);
+    if (application.body) editor.commands.setContent(application.body, false);
     if (template.to) setRecipients('to', template.to);
     if (template.cc) setRecipients('cc', template.cc);
     if (template.bcc) setRecipients('bcc', template.bcc);
-    
-    setTimeout(() => {
-      editor.chain().focus('end').run();
-    }, 200);
-  }, [editor, setSubject, setRecipients]);
+    setTimeout(() => editor.chain().focus('end').run(), 200);
+  }, [editor, senderEmail, senderName, setSubject, setRecipients, to]);
+
+  const handleMenuOpenChange = useCallback((open: boolean) => {
+    if (open && editor) {
+      selectionRef.current = {
+        from: editor.state.selection.from,
+        to: editor.state.selection.to,
+      };
+    }
+    setMenuOpen(open);
+  }, [editor]);
 
   const handleDeleteTemplate = useCallback(
     async (templateId: string) => {
@@ -194,7 +230,7 @@ const TemplateButtonComponent: React.FC<TemplateButtonProps> = ({
 
   return (
     <>
-      <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+      <DropdownMenu open={menuOpen} onOpenChange={handleMenuOpenChange}>
         <DropdownMenuTrigger asChild>
           <Button type="button" size={'xs'} variant={'secondary'} className="bg-background border hover:bg-gray-50 dark:hover:bg-[#404040] transition-colors cursor-pointer" disabled={isSaving}>
             Templates
@@ -204,16 +240,39 @@ const TemplateButtonComponent: React.FC<TemplateButtonProps> = ({
           <DropdownMenuItem
             onSelect={() => {
               setMenuOpen(false);
+              setSaveKind('template');
               setSaveDialogOpen(true);
             }}
             disabled={isSaving}
           >
             <Save className="mr-2 h-3.5 w-3.5" /> Save current as template
           </DropdownMenuItem>
-           {templates.length > 0 ? (
+          <DropdownMenuItem
+            onSelect={() => {
+              setMenuOpen(false);
+              setSaveKind('snippet');
+              setSaveDialogOpen(true);
+            }}
+            disabled={isSaving}
+          >
+            <span className="mr-2 text-xs">{'{ }'}</span> Save message as snippet
+          </DropdownMenuItem>
+          {templatesQuery.isLoading ? (
+            <DropdownMenuItem disabled>Loading saved items…</DropdownMenuItem>
+          ) : templatesQuery.isError ? (
+            <DropdownMenuItem
+              disabled={templatesQuery.isFetching}
+              onSelect={(event) => {
+                event.preventDefault();
+                void templatesQuery.refetch();
+              }}
+            >
+              {templatesQuery.isFetching ? 'Trying again…' : 'Could not load saved items · Try again'}
+            </DropdownMenuItem>
+          ) : templates.length > 0 ? (
             <DropdownMenuSub>
               <DropdownMenuSubTrigger>
-                <FileText className="mr-2 h-3.5 w-3.5" /> Use template
+                <FileText className="mr-2 h-3.5 w-3.5" /> Use saved
               </DropdownMenuSubTrigger>
               <DropdownMenuSubContent className="z-99999 w-60">
                 <div className="p-2 border-b border-border sticky top-0 bg-background">
@@ -234,6 +293,9 @@ const TemplateButtonComponent: React.FC<TemplateButtonProps> = ({
                       onClick={handleTemplateItemClick}
                     >
                       <span className="flex-1 truncate text-left">{t.name}</span>
+                      <span className="text-muted-foreground text-[10px] capitalize">
+                        {t.kind ?? 'template'}
+                      </span>
                       <button
                         className="p-0.5 text-muted-foreground hover:text-destructive"
                         data-template-id={t.id}
@@ -244,27 +306,35 @@ const TemplateButtonComponent: React.FC<TemplateButtonProps> = ({
                     </DropdownMenuItem>
                   ))}
                   {filteredTemplates.length === 0 && (
-                    <div className="p-2 text-xs text-muted-foreground">No templates</div>
+                    <div className="p-2 text-xs text-muted-foreground">No saved items</div>
                   )}
                 </div>
               </DropdownMenuSubContent>
             </DropdownMenuSub>
-          ) : null}
+          ) : (
+            <DropdownMenuItem disabled>No saved items yet</DropdownMenuItem>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
 
       <Dialog open={saveDialogOpen} onOpenChange={setSaveDialogOpen}>
         <DialogContent showOverlay>
           <DialogHeader>
-            <DialogTitle>Save as Template</DialogTitle>
+            <DialogTitle>Save as {saveKind === 'snippet' ? 'Snippet' : 'Template'}</DialogTitle>
           </DialogHeader>
           <div className="py-4 space-y-2">
             <Input
-              placeholder="Template name"
+              placeholder={`${saveKind === 'snippet' ? 'Snippet' : 'Template'} name`}
               value={templateName}
               onChange={(e) => setTemplateName(e.target.value)}
               autoFocus
             />
+            {saveKind === 'snippet' ? (
+              <p className="text-muted-foreground text-xs leading-5">
+                Snippets insert at the cursor. Available variables:{' '}
+                {TEMPLATE_VARIABLES.map(({ token }) => token).join(', ')}
+              </p>
+            ) : null}
           </div>
           <DialogFooter className="flex justify-end gap-2">
             <Button
@@ -284,4 +354,4 @@ const TemplateButtonComponent: React.FC<TemplateButtonProps> = ({
   );
 };
 
-export const TemplateButton = React.memo(TemplateButtonComponent); 
+export const TemplateButton = React.memo(TemplateButtonComponent);

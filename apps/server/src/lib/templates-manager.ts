@@ -6,6 +6,7 @@ type EmailTemplate = {
   id: string;
   userId: string;
   name: string;
+  kind: 'template' | 'snippet';
   subject: string | null;
   body: string | null;
   to: string[] | null;
@@ -26,6 +27,7 @@ export class TemplatesManager {
     payload: {
       id?: string;
       name: string;
+      kind?: 'template' | 'snippet';
       subject?: string | null;
       body?: string | null;
       to?: string[] | null;
@@ -72,6 +74,7 @@ export class TemplatesManager {
     const [template] = await db.createEmailTemplate({
       id,
       name: payload.name,
+      kind: payload.kind ?? 'template',
       subject: payload.subject ?? null,
       body: payload.body ?? null,
       to: payload.to ?? null,
@@ -86,4 +89,4 @@ export class TemplatesManager {
     await db.deleteEmailTemplate(templateId);
     return true;
   }
-} 
+}

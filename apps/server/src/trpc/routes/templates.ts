@@ -16,6 +16,7 @@ export const templatesRouter = router({
     .input(
       z.object({
         name: z.string().min(1),
+        kind: z.enum(['template', 'snippet']).default('template'),
         subject: z.string().default(''),
         body: z.string().default(''),
         to: z.array(z.string()).optional(),
@@ -33,4 +34,4 @@ export const templatesRouter = router({
       await ctx.templatesManager.deleteTemplate(ctx.sessionUser.id, input.id);
       return { success: true };
     }),
-}); 
+});
