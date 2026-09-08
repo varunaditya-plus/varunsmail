@@ -1,12 +1,16 @@
 import { getCurrentDateContext, GmailSearchAssistantSystemPrompt } from '../../lib/prompts';
 import { getThread, getZeroAgent } from '../../lib/server-utils';
 import type { IGetThreadResponse } from '../../lib/driver/types';
+import { searchAcrossAccounts } from './cross-account-search';
 import { composeEmail } from '../../trpc/routes/ai/compose';
 import { colors } from '../../lib/prompts';
 import { getAIModel, getWebSearchOptions, summarizeText } from '../../lib/ai-model';
+import { connection } from '../../db/schema';
 import { generateText, tool } from 'ai';
+import { createDb } from '../../db';
 import { Tools } from '../../types';
 import { env } from '../../env';
+import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 
 export const getEmbeddingVector = async (text: string) => {
@@ -89,31 +93,49 @@ export const getEmbeddingVector = async (text: string) => {
  * may hit the 128 MB cap in Cloudflare Workers. We only hand back a lightweight
  * tag that the front-end can interpret.
  *
- * The tag format must be exactly: <thread id="{id}"/>
+ * The tag includes the owned connection so colliding Gmail thread IDs stay isolated.
  */
-const getEmail = () =>
+async function resolveOwnedConnection(activeConnectionId: string, requestedConnectionId?: string) {
+  if (!requestedConnectionId || requestedConnectionId === activeConnectionId) {
+    return activeConnectionId;
+  }
+  const { db } = createDb(env.DB);
+  const [active, requested] = await Promise.all([
+    db.query.connection.findFirst({ where: eq(connection.id, activeConnectionId) }),
+    db.query.connection.findFirst({ where: eq(connection.id, requestedConnectionId) }),
+  ]);
+  if (!active || !requested || active.userId !== requested.userId) {
+    throw new Error('Mailbox connection not found');
+  }
+  return requested.id;
+}
+
+const getEmail = (activeConnectionId: string) =>
   tool({
     description: 'Return a placeholder tag for a specific email thread by ID',
     parameters: z.object({
       id: z.string().describe('The ID of the email thread to retrieve'),
+      connectionId: z.string().optional().describe('The source mailbox connection ID'),
     }),
-    execute: async ({ id }) => {
-      /* nothing to fetch server-side any more */
-      return `<thread id="${id}"/>`;
+    execute: async ({ id, connectionId }) => {
+      const ownedConnectionId = await resolveOwnedConnection(activeConnectionId, connectionId);
+      return `<thread id="${id}" connectionId="${ownedConnectionId}"/>`;
     },
   });
 
-const getThreadSummary = (connectionId: string) =>
+const getThreadSummary = (activeConnectionId: string) =>
   tool({
     description: 'Get the summary of a specific email thread',
     parameters: z.object({
       id: z.string().describe('The ID of the email thread to get the summary of'),
+      connectionId: z.string().optional().describe('The source mailbox connection ID'),
     }),
-    execute: async ({ id }) => {
+    execute: async ({ id, connectionId }) => {
+      const ownedConnectionId = await resolveOwnedConnection(activeConnectionId, connectionId);
       const response = await env.VECTORIZE.getByIds([id]);
       let thread: IGetThreadResponse | null = null;
       try {
-        const { result } = await getThread(connectionId, id);
+        const { result } = await getThread(ownedConnectionId, id);
         thread = result;
       } catch (error) {
         console.error('Error getting thread', error);
@@ -121,7 +143,7 @@ const getThreadSummary = (connectionId: string) =>
       }
       if (response.length && response?.[0]?.metadata?.['summary'] && thread?.latest?.subject) {
         const result = response[0].metadata as { summary: string; connection: string };
-        if (result.connection !== connectionId) {
+        if (result.connection !== ownedConnectionId) {
           return null;
         }
         const shortSummary = await summarizeText(result.summary, env);
@@ -454,9 +476,59 @@ export const webSearch = () =>
     },
   });
 
+const searchMailbox = (activeConnectionId: string) =>
+  tool({
+    description:
+      'Search every connected mailbox and return exact source threads with account and match provenance. Use this for mailbox questions and read-only email searches.',
+    parameters: z.object({
+      query: z.string().describe('The natural-language mailbox question or search'),
+      maxResults: z.number().int().min(1).max(20).default(10),
+      folder: z.string().describe('The folder to search').default('all'),
+    }),
+    execute: async ({ query, maxResults, folder }) => {
+      const { db } = createDb(env.DB);
+      const activeConnection = await db.query.connection.findFirst({
+        where: eq(connection.id, activeConnectionId),
+      });
+      if (!activeConnection) throw new Error('Active mailbox is unavailable');
+
+      const connections = await db.query.connection.findMany({
+        where: eq(connection.userId, activeConnection.userId),
+      });
+      const accounts = connections.map(({ id, email, name }) => ({ id, email, name }));
+
+      return searchAcrossAccounts(
+        accounts,
+        { query, maxResults, folder },
+        {
+          search: async (connectionId, params) => {
+            const { stub: agent } = await getZeroAgent(connectionId);
+            const result = await agent.searchThreads(params);
+            const threadIds: string[] = [];
+            for (const threadId of result.threadIds) {
+              if (typeof threadId === 'string') threadIds.push(threadId);
+            }
+            const error = 'error' in result && typeof result.error === 'string'
+              ? result.error
+              : undefined;
+            return {
+              threadIds,
+              source: result.source === 'autorag' ? 'autorag' : 'raw',
+              ...(error ? { error } : {}),
+            };
+          },
+          loadThread: async (connectionId, threadId) => {
+            const { result } = await getThread(connectionId, threadId);
+            return result;
+          },
+        },
+      );
+    },
+  });
+
 export const tools = async (connectionId: string, ragEffect: boolean = false) => {
   const _tools = {
-    [Tools.GetThread]: getEmail(),
+    [Tools.GetThread]: getEmail(connectionId),
     [Tools.GetThreadSummary]: getThreadSummary(connectionId),
     [Tools.ComposeEmail]: composeEmailTool(connectionId),
     [Tools.MarkThreadsRead]: markAsRead(connectionId),
@@ -471,6 +543,7 @@ export const tools = async (connectionId: string, ragEffect: boolean = false) =>
     [Tools.BuildGmailSearchQuery]: buildGmailSearchQuery(),
     [Tools.GetCurrentDate]: getCurrentDate(),
     [Tools.WebSearch]: webSearch(),
+    [Tools.SearchMailbox]: searchMailbox(connectionId),
     [Tools.InboxRag]: tool({
       description:
         'Search the inbox for emails using natural language. Returns only an array of threadIds.',

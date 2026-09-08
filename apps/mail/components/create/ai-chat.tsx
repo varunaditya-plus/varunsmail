@@ -6,26 +6,31 @@ import { useRef, useCallback, useEffect } from 'react';
 import type { useAgentChat } from 'agents/ai-react';
 import { Markdown } from '@react-email/components';
 import { TextShimmer } from '../ui/text-shimmer';
+import { getAccountColor } from '@/lib/thread-ref';
 import { useThread } from '@/hooks/use-threads';
 import { MailLabels } from '../mail/mail-list';
 import { cn, getEmailLogo } from '@/lib/utils';
 import type { Message as AiMessage } from 'ai';
+import type { Label } from '@/types';
 import { VoiceButton } from '../voice-button';
 import { EditorContent } from '@tiptap/react';
 import { CurvedArrow } from '../icons/icons';
 import { Tools } from '../../types/tools';
 import { format } from 'date-fns-tz';
-import { useQueryState } from 'nuqs';
+import { parseAsString, useQueryState, useQueryStates } from 'nuqs';
 import { Sparkles } from 'lucide-react';
 
-const ThreadPreview = ({ threadId }: { threadId: string }) => {
-  const [, setThreadId] = useQueryState('threadId');
-  const { data: getThread } = useThread(threadId);
+const ThreadPreview = ({ threadId, connectionId }: { threadId: string; connectionId?: string }) => {
+  const [, setThreadReference] = useQueryStates({
+    threadId: parseAsString,
+    connectionId: parseAsString,
+  });
+  const { data: getThread } = useThread(threadId, connectionId);
   const [, setIsFullScreen] = useQueryState('isFullScreen');
 
   const handleClick = () => {
-    setThreadId(threadId);
-    setIsFullScreen(null);
+    void setThreadReference({ threadId, connectionId: connectionId ?? null });
+    void setIsFullScreen(null);
   };
 
   if (!getThread?.latest) return null;
@@ -66,6 +71,114 @@ const ThreadPreview = ({ threadId }: { threadId: string }) => {
         </div>
       </div>
     </div>
+  );
+};
+
+type MailboxSearchSource = {
+  threadId: string;
+  connectionId: string;
+  accountEmail: string;
+  accountName: string | null;
+  subject: string;
+  sender: { name: string; email: string };
+  receivedOn: string;
+  excerpt: string;
+  provenance: 'semantic' | 'provider';
+  unavailable: boolean;
+};
+
+type MailboxSearchResult = {
+  sources: MailboxSearchSource[];
+  searchedAccounts: number;
+  failures: { accountEmail: string }[];
+};
+
+function isMailboxSearchResult(result: unknown): result is MailboxSearchResult {
+  if (!result || typeof result !== 'object' || !('sources' in result)) return false;
+  return Array.isArray(result.sources) && result.sources.every((source) => {
+    return !!source && typeof source === 'object' &&
+      'threadId' in source && typeof source.threadId === 'string' &&
+      'connectionId' in source && typeof source.connectionId === 'string';
+  });
+}
+
+function hasLabels(result: unknown): result is { labels: Label[] } {
+  if (!result || typeof result !== 'object' || !('labels' in result)) return false;
+  return Array.isArray(result.labels) && result.labels.every((label) => {
+    return !!label && typeof label === 'object' &&
+      'id' in label && typeof label.id === 'string' &&
+      'name' in label && typeof label.name === 'string' &&
+      'type' in label && typeof label.type === 'string';
+  });
+}
+
+const SearchSourcePreview = ({ source }: { source: MailboxSearchSource }) => {
+  const [, setThreadReference] = useQueryStates({
+    threadId: parseAsString,
+    connectionId: parseAsString,
+  });
+  const [, setIsFullScreen] = useQueryState('isFullScreen');
+  const sender = source.sender.name || source.sender.email || 'Unknown sender';
+
+  const handleClick = () => {
+    if (source.unavailable) return;
+    void setThreadReference({
+      threadId: source.threadId,
+      connectionId: source.connectionId,
+    });
+    void setIsFullScreen(null);
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      disabled={source.unavailable}
+      className={cn(
+        'w-full rounded-lg p-2 text-left transition-colors',
+        source.unavailable
+          ? 'cursor-default opacity-60'
+          : 'hover:bg-offsetLight/50 dark:hover:bg-offsetDark/40',
+      )}
+    >
+      <div className="flex items-start gap-3">
+        <Avatar className="mt-0.5 h-8 w-8 shrink-0">
+          <AvatarImage className="rounded-full" src={getEmailLogo(source.sender.email)} />
+          <AvatarFallback className="rounded-full bg-white font-bold text-[#9F9F9F] dark:bg-[#373737]">
+            {sender[0]?.toUpperCase()}
+          </AvatarFallback>
+        </Avatar>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center justify-between gap-2">
+            <p className="truncate text-sm font-medium text-black dark:text-white">{sender}</p>
+            <span className="shrink-0 text-xs text-[#8C8C8C]">
+              {source.receivedOn ? format(source.receivedOn, 'MMMM do') : ''}
+            </span>
+          </div>
+          <p className="mt-0.5 truncate text-xs text-[#686868] dark:text-[#A0A0A0]">
+            {source.subject}
+          </p>
+          {source.excerpt ? (
+            <p className="mt-1 line-clamp-2 text-xs leading-4 text-[#8C8C8C]">{source.excerpt}</p>
+          ) : null}
+          <div className="mt-1.5 flex min-w-0 items-center gap-2 text-[11px] text-[#8C8C8C]">
+            <span
+              className="h-2 w-2 shrink-0 rounded-full"
+              style={{ backgroundColor: getAccountColor(source.connectionId) }}
+            />
+            <span className="truncate">{source.accountEmail}</span>
+            <span aria-hidden="true">·</span>
+            <span className="shrink-0">
+              {source.unavailable
+                ? 'Thread unavailable'
+                : source.provenance === 'semantic'
+                  ? 'Semantic match'
+                  : 'Mailbox match'}
+            </span>
+          </div>
+        </div>
+      </div>
+    </button>
   );
 };
 
@@ -146,31 +259,57 @@ export interface AIChatProps {
 }
 
 // Subcomponents for ToolResponse
-const GetThreadToolResponse = ({ result, args }: { result: any; args: any }) => {
+const GetThreadToolResponse = ({ result, args }: { result: unknown; args: unknown }) => {
   // Extract threadId from result or args
   let threadId: string | null = null;
+  let connectionId: string | undefined;
   if (typeof result === 'string') {
-    const match = result.match(/<thread id="([^"]+)" ?\/>/);
+    const match = result.match(/<thread id="([^"]+)"(?: connectionId="([^"]+)")? ?\/>/);
     if (match?.[1]) threadId = match[1];
+    if (match?.[2]) connectionId = match[2];
   }
-  if (!threadId && args?.id && typeof args.id === 'string') threadId = args.id;
+  if (
+    !threadId &&
+    args &&
+    typeof args === 'object' &&
+    'id' in args &&
+    typeof args.id === 'string'
+  ) {
+    threadId = args.id;
+  }
+  if (
+    !connectionId &&
+    args &&
+    typeof args === 'object' &&
+    'connectionId' in args &&
+    typeof args.connectionId === 'string'
+  ) {
+    connectionId = args.connectionId;
+  }
   if (!threadId) return null;
-  return <ThreadPreview threadId={threadId} />;
+  return <ThreadPreview threadId={threadId} connectionId={connectionId} />;
 };
 
-const GetUserLabelsToolResponse = ({ result }: { result: any }) => {
-  if (!result?.labels) return null;
+const GetUserLabelsToolResponse = ({ result }: { result: unknown }) => {
+  if (!hasLabels(result)) return null;
   return (
     <div className="flex flex-wrap gap-2">
-      {result.labels.map((label: any) => (
+      {result.labels.map((label) => (
         <MailLabels key={label.id} labels={[label]} />
       ))}
     </div>
   );
 };
 
-const ComposeEmailToolResponse = ({ result }: { result: any }) => {
-  if (!result?.newBody) return null;
+const ComposeEmailToolResponse = ({ result }: { result: unknown }) => {
+  if (
+    !result ||
+    typeof result !== 'object' ||
+    !('newBody' in result) ||
+    typeof result.newBody !== 'string'
+  ) {
+    return null;
+  }
   return (
     <div className="rounded-lg border border-gray-200 p-4 dark:border-gray-800">
       <div className="prose dark:prose-invert max-w-none">
@@ -180,8 +319,50 @@ const ComposeEmailToolResponse = ({ result }: { result: any }) => {
   );
 };
 
+const MailboxSearchToolResponse = ({ result }: { result: unknown }) => {
+  if (!isMailboxSearchResult(result)) return null;
+  const failures = Array.isArray(result.failures) ? result.failures : [];
+
+  return (
+    <div className="mt-1 rounded-xl border border-black/10 p-1 dark:border-white/10">
+      <div className="flex items-center justify-between gap-2 px-2 py-1.5 text-xs text-[#8C8C8C]">
+        <span>
+          {result.sources.length} source{result.sources.length === 1 ? '' : 's'} ·{' '}
+          {result.searchedAccounts} account{result.searchedAccounts === 1 ? '' : 's'} searched
+        </span>
+        {failures.length ? <span className="text-amber-600">Partial results</span> : null}
+      </div>
+      <div className="divide-y divide-black/5 dark:divide-white/5">
+        {result.sources.map((source: MailboxSearchSource) => (
+          <SearchSourcePreview
+            key={`${source.connectionId}:${source.threadId}`}
+            source={source}
+          />
+        ))}
+      </div>
+      {failures.length ? (
+        <p className="px-2 py-1.5 text-xs text-[#8C8C8C]">
+          Couldn&apos;t search{' '}
+          {failures
+            .map((failure) => failure.accountEmail)
+            .join(', ')}
+          .
+        </p>
+      ) : null}
+    </div>
+  );
+};
+
 // Main ToolResponse switcher
-const ToolResponse = ({ toolName, result, args }: { toolName: string; result: any; args: any }) => {
+const ToolResponse = ({
+  toolName,
+  result,
+  args,
+}: {
+  toolName: string;
+  result: unknown;
+  args: unknown;
+}) => {
   switch (toolName) {
     case Tools.GetThread:
       return <GetThreadToolResponse result={result} args={args} />;
@@ -189,6 +370,8 @@ const ToolResponse = ({ toolName, result, args }: { toolName: string; result: an
       return <GetUserLabelsToolResponse result={result} />;
     case Tools.ComposeEmail:
       return <ComposeEmailToolResponse result={result} />;
+    case Tools.SearchMailbox:
+      return <MailboxSearchToolResponse result={result} />;
     default:
       return null;
   }
@@ -277,20 +460,29 @@ export function AIChat({
             messages.map((message, index) => {
               const textParts = message.parts.filter((part) => part.type === 'text');
               const toolParts = message.parts.filter((part) => part.type === 'tool-invocation');
+              const sourceParts = toolParts.filter(
+                (part) => part.toolInvocation?.toolName === Tools.SearchMailbox,
+              );
+              const otherToolParts = toolParts.filter(
+                (part) => part.toolInvocation?.toolName !== Tools.SearchMailbox,
+              );
 
               return (
                 <div key={`${message.id}-${index}`} className="mb-2 flex flex-col" data-message-role={message.role}>
-                  {toolParts.map(
-                    (part, index) =>
-                      part.toolInvocation?.result && (
-                        <ToolResponse
-                          key={`${part.toolInvocation.toolName}-${index}`}
-                          toolName={part.toolInvocation.toolName}
-                          result={part.toolInvocation.result}
-                          args={part.toolInvocation.args}
-                        />
-                      ),
-                  )}
+                  {otherToolParts.map((part, index) => {
+                    const invocation = part.toolInvocation;
+                    if (!invocation || !('result' in invocation) || invocation.result == null) {
+                      return null;
+                    }
+                    return (
+                      <ToolResponse
+                        key={`${invocation.toolName}-${index}`}
+                        toolName={invocation.toolName}
+                        result={invocation.result}
+                        args={invocation.args}
+                      />
+                    );
+                  })}
                   {textParts.length > 0 && (
                     <div
                       className={cn(
@@ -334,6 +526,20 @@ export function AIChat({
                       )}
                     </div>
                   )}
+                  {sourceParts.map((part, index) => {
+                    const invocation = part.toolInvocation;
+                    if (!invocation || !('result' in invocation) || invocation.result == null) {
+                      return null;
+                    }
+                    return (
+                      <ToolResponse
+                        key={`${invocation.toolName}-${index}`}
+                        toolName={invocation.toolName}
+                        result={invocation.result}
+                        args={invocation.args}
+                      />
+                    );
+                  })}
                 </div>
               );
             })
