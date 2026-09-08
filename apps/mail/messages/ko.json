@@ -89,7 +89,6 @@
         "searchEmails": "이메일 검색",
         "toggleTheme": "테마 전환",
         "backToMail": "메일로 돌아가기",
-        "goToDocs": "문서로 이동",
         "helpWithShortcuts": "단축키 도움말",
         "commandPalette": "명령 팔레트"
       },
@@ -134,8 +133,6 @@
       "aiEnhancedQuery": "향상된 검색 쿼리"
     },
     "navUser": {
-      "customerSupport": "커뮤니티",
-      "documentation": "문서",
       "appTheme": "테마 전환",
       "accounts": "계정",
       "signIn": "로그인",
@@ -422,8 +419,6 @@
       "spam": "스팸",
       "archive": "보관함",
       "bin": "휴지통",
-      "livesupport": "실시간 지원",
-      "feedback": "피드백",
       "settings": "설정",
       "voice": "음성 비서",
       "snoozed": "스누즈됨"

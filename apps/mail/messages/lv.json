@@ -89,7 +89,6 @@
         "searchEmails": "Meklēt e-pastus",
         "toggleTheme": "Pārslēgt krāsu tēmu",
         "backToMail": "Atpakaļ uz e-pastu",
-        "goToDocs": "Doties uz dokumentāciju",
         "helpWithShortcuts": "Tastatūras īsceļu palīdzība",
         "commandPalette": "Komandu palete"
       },
@@ -134,8 +133,6 @@
       "aiEnhancedQuery": "Uzlabota meklēšanas frāze"
     },
     "navUser": {
-      "customerSupport": "Kopiena",
-      "documentation": "Dokumentācija",
       "appTheme": "Pārslēgt krāsu tēmu",
       "accounts": "Konti",
       "signIn": "Pierakstīties",
@@ -422,8 +419,6 @@
       "spam": "Mēstules",
       "archive": "Arhīvs",
       "bin": "Miskaste",
-      "livesupport": "Tiešsaistes atbalsts",
-      "feedback": "Atsauksmes",
       "settings": "Iestatījumi",
       "voice": "Balss asistents",
       "snoozed": "Atlikti"

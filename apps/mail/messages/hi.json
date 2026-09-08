@@ -89,7 +89,6 @@
         "searchEmails": "ईमेल खोजें",
         "toggleTheme": "थीम टॉगल करें",
         "backToMail": "मेल पर वापस जाएं",
-        "goToDocs": "डॉक्स पर जाएं",
         "helpWithShortcuts": "शॉर्टकट से मदद करें",
         "commandPalette": "कमांड पैलेट"
       },
@@ -134,8 +133,6 @@
       "aiEnhancedQuery": "बेहतर खोज क्वेरी"
     },
     "navUser": {
-      "customerSupport": "समुदाय",
-      "documentation": "डॉक्यूमेंटेशन",
       "appTheme": "थीम टॉगल करें",
       "accounts": "खाता",
       "signIn": "साइन इन करें",
@@ -422,8 +419,6 @@
       "spam": "स्पैम",
       "archive": "आर्काइव",
       "bin": "बिन",
-      "livesupport": "लाइव सपोर्ट",
-      "feedback": "प्रतिक्रिया",
       "settings": "सेटिंग्स",
       "voice": "वॉइस असिस्टेंट",
       "snoozed": "स्नूज़ किए गए"

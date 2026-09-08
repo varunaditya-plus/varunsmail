@@ -89,7 +89,6 @@
         "searchEmails": "E-postaları Ara",
         "toggleTheme": "Temayı Değiştir",
         "backToMail": "E-postaya Geri Dön",
-        "goToDocs": "Dokümanlara Git",
         "helpWithShortcuts": "Kısayollar Hakkında Yardım",
         "commandPalette": "Komut Paleti"
       },
@@ -134,8 +133,6 @@
       "aiEnhancedQuery": "Geliştirilmiş arama sorgusu"
     },
     "navUser": {
-      "customerSupport": "Topluluk",
-      "documentation": "Dokümantasyon",
       "appTheme": "Temayı Değiştir",
       "accounts": "Hesaplar",
       "signIn": "Giriş Yap",
@@ -422,8 +419,6 @@
       "spam": "İstenmeyen E-posta",
       "archive": "Arşiv",
       "bin": "Çöp",
-      "livesupport": "Canlı Destek",
-      "feedback": "Geribildirim",
       "settings": "Ayarlar",
       "voice": "Sesli Asistan",
       "snoozed": "Ertelendi"

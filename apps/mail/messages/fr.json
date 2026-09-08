@@ -89,7 +89,6 @@
         "searchEmails": "Rechercher des courriels",
         "toggleTheme": "Changer de thème",
         "backToMail": "Retour aux courriels",
-        "goToDocs": "Voir la documentation",
         "helpWithShortcuts": "Aide sur les raccourcis",
         "commandPalette": "Palette de commandes"
       },
@@ -134,8 +133,6 @@
       "aiEnhancedQuery": "Requête de recherche avancée"
     },
     "navUser": {
-      "customerSupport": "Communauté",
-      "documentation": "Documentation",
       "appTheme": "Changer de thème",
       "accounts": "Comptes",
       "signIn": "Se connecter",
@@ -422,8 +419,6 @@
       "spam": "Pourriels",
       "archive": "Archives",
       "bin": "Corbeille",
-      "livesupport": "Support en direct",
-      "feedback": "Vos commentaires",
       "settings": "Paramètres",
       "voice": "Assistant vocal",
       "snoozed": "En sommeil"

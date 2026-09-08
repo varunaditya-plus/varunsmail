@@ -89,7 +89,6 @@
         "searchEmails": "جستجوی ایمیل‌ها",
         "toggleTheme": "تغییر پوسته",
         "backToMail": "بازگشت به ایمیل",
-        "goToDocs": "رفتن به مستندات",
         "helpWithShortcuts": "راهنمای میانبرها",
         "commandPalette": "پالت فرمان"
       },
@@ -134,8 +133,6 @@
       "aiEnhancedQuery": "پرس‌وجوی پیشرفته جستجو"
     },
     "navUser": {
-      "customerSupport": "انجمن",
-      "documentation": "مستندات",
       "appTheme": "تغییر پوسته",
       "accounts": "حساب‌ها",
       "signIn": "ورود",
@@ -422,8 +419,6 @@
       "spam": "هرزنامه",
       "archive": "آرشیو",
       "bin": "سطل زباله",
-      "livesupport": "پشتیبانی زنده",
-      "feedback": "بازخورد",
       "settings": "تنظیمات",
       "voice": "دستیار صوتی",
       "snoozed": "به تعویق افتاده"

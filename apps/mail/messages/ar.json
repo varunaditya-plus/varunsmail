@@ -89,7 +89,6 @@
         "searchEmails": "البحث في الرسائل",
         "toggleTheme": "تبديل السمة",
         "backToMail": "العودة إلى البريد",
-        "goToDocs": "الذهاب إلى المستندات",
         "helpWithShortcuts": "المساعدة في الاختصارات",
         "commandPalette": "لوحة الأوامر"
       },
@@ -134,8 +133,6 @@
       "aiEnhancedQuery": "استعلام بحث محسّن"
     },
     "navUser": {
-      "customerSupport": "المجتمع",
-      "documentation": "الوثائق",
       "appTheme": "تبديل السمة",
       "accounts": "الحسابات",
       "signIn": "تسجيل الدخول",
@@ -422,8 +419,6 @@
       "spam": "البريد المزعج",
       "archive": "الأرشيف",
       "bin": "سلة المحذوفات",
-      "livesupport": "الدعم المباشر",
-      "feedback": "الملاحظات",
       "settings": "الإعدادات",
       "voice": "المساعد الصوتي",
       "snoozed": "مؤجل"

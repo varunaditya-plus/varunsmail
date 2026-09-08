@@ -89,7 +89,6 @@
         "searchEmails": "E-Mails suchen",
         "toggleTheme": "Theme wechseln",
         "backToMail": "Zurück zu den Mails",
-        "goToDocs": "Zur Dokumentation",
         "helpWithShortcuts": "Hilfe für Tastenkürzel",
         "commandPalette": "Befehlspalette"
       },
@@ -134,8 +133,6 @@
       "aiEnhancedQuery": "Erweiterte Suchanfrage"
     },
     "navUser": {
-      "customerSupport": "Community",
-      "documentation": "Dokumentation",
       "appTheme": "Theme wechseln",
       "accounts": "Benutzerkonten",
       "signIn": "Anmelden",
@@ -422,8 +419,6 @@
       "spam": "Spam",
       "archive": "Archiv",
       "bin": "Papierkorb",
-      "livesupport": "Live-Support",
-      "feedback": "Rückmeldung",
       "settings": "Einstellungen",
       "voice": "Sprachassistent",
       "snoozed": "Zurückgestellt"

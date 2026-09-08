@@ -89,7 +89,6 @@
         "searchEmails": "Prohledat emaily",
         "toggleTheme": "Přepnout motiv",
         "backToMail": "Zpět na Email",
-        "goToDocs": "Přejít do dokumentace",
         "helpWithShortcuts": "Nápověda se zkratkami",
         "commandPalette": "Paleta příkazů"
       },
@@ -134,8 +133,6 @@
       "aiEnhancedQuery": "Vylepšený vyhledávací dotaz"
     },
     "navUser": {
-      "customerSupport": "Komunita",
-      "documentation": "Dokumentace",
       "appTheme": "Přepnout motiv",
       "accounts": "Účty",
       "signIn": "Přihlásit se",
@@ -422,8 +419,6 @@
       "spam": "Nevyžádaná pošta",
       "archive": "Archiv",
       "bin": "Odstraněná pošta",
-      "livesupport": "Živá podpora",
-      "feedback": "Zpětná vazba",
       "settings": "Nastavení",
       "voice": "Hlasový asistent",
       "snoozed": "Odložené"

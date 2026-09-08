@@ -89,7 +89,6 @@
         "searchEmails": "メールを検索",
         "toggleTheme": "テーマを切り替え",
         "backToMail": "メールに戻る",
-        "goToDocs": "ドキュメントに移動",
         "helpWithShortcuts": "ショートカットのヘルプ",
         "commandPalette": "コマンド パレット"
       },
@@ -134,8 +133,6 @@
       "aiEnhancedQuery": "拡張検索クエリ"
     },
     "navUser": {
-      "customerSupport": "コミュニティ",
-      "documentation": "ドキュメント",
       "appTheme": "テーマを切り替え",
       "accounts": "アカウント",
       "signIn": "サインイン",
@@ -422,8 +419,6 @@
       "spam": "迷惑メール",
       "archive": "アーカイブ",
       "bin": "ごみ箱",
-      "livesupport": "ライブサポート",
-      "feedback": "フィードバック",
       "settings": "設定",
       "voice": "音声アシスタント",
       "snoozed": "スヌーズ済み"

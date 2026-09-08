@@ -89,7 +89,6 @@
         "searchEmails": "Поиск",
         "toggleTheme": "Переключить тему",
         "backToMail": "Вернуться в Почту",
-        "goToDocs": "Перейти в Документацию",
         "helpWithShortcuts": "Помощь с горячими клавишами",
         "commandPalette": "Командная палитра"
       },
@@ -134,8 +133,6 @@
       "aiEnhancedQuery": "Расширенный поиск"
     },
     "navUser": {
-      "customerSupport": "Сообщество",
-      "documentation": "Документация",
       "appTheme": "Переключить тему",
       "accounts": "Аккаунты",
       "signIn": "Войти",
@@ -422,8 +419,6 @@
       "spam": "Спам",
       "archive": "Архив",
       "bin": "Корзина",
-      "livesupport": "Поддержка в реальном времени",
-      "feedback": "Отзывы",
       "settings": "Настройки",
       "voice": "Голосовой помощник",
       "snoozed": "Отложенные"

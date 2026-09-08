@@ -89,7 +89,6 @@
         "searchEmails": "E-mailek keresése",
         "toggleTheme": "Téma váltása",
         "backToMail": "Vissza a levelezéshez",
-        "goToDocs": "Ugrás a dokumentációhoz",
         "helpWithShortcuts": "Segítség a gyorsbillentyűkhöz",
         "commandPalette": "Parancspaletta"
       },
@@ -134,8 +133,6 @@
       "aiEnhancedQuery": "Továbbfejlesztett keresési lekérdezés"
     },
     "navUser": {
-      "customerSupport": "Közösség",
-      "documentation": "Dokumentáció",
       "appTheme": "Téma váltása",
       "accounts": "Fiókok",
       "signIn": "Bejelentkezés",
@@ -422,8 +419,6 @@
       "spam": "Spam",
       "archive": "Archívum",
       "bin": "Lomtár",
-      "livesupport": "Élő támogatás",
-      "feedback": "Visszajelzés",
       "settings": "Beállítások",
       "voice": "Hangasszisztens",
       "snoozed": "Elhalasztva"

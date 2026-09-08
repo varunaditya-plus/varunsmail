@@ -89,7 +89,6 @@
         "searchEmails": "E-mails zoeken",
         "toggleTheme": "Thema wisselen",
         "backToMail": "Terug naar mail",
-        "goToDocs": "Ga naar documentatie",
         "helpWithShortcuts": "Help met sneltoetsen",
         "commandPalette": "Opdrachtenpalet"
       },
@@ -134,8 +133,6 @@
       "aiEnhancedQuery": "Verbeterde zoekopdracht"
     },
     "navUser": {
-      "customerSupport": "Community",
-      "documentation": "Documentatie",
       "appTheme": "Thema wisselen",
       "accounts": "Accounts",
       "signIn": "Inloggen",
@@ -422,8 +419,6 @@
       "spam": "Spam",
       "archive": "Archief",
       "bin": "Prullenbak",
-      "livesupport": "Live ondersteuning",
-      "feedback": "Feedback",
       "settings": "Instellingen",
       "voice": "Spraakassistent",
       "snoozed": "Uitgesteld"

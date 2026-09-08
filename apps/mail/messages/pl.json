@@ -89,7 +89,6 @@
         "searchEmails": "Szukaj e-maili",
         "toggleTheme": "Przełącz motyw",
         "backToMail": "Powrót do poczty",
-        "goToDocs": "Przejdź do dokumentacji",
         "helpWithShortcuts": "Pomoc ze skrótami",
         "commandPalette": "Paleta poleceń"
       },
@@ -134,8 +133,6 @@
       "aiEnhancedQuery": "Ulepszone zapytanie wyszukiwania"
     },
     "navUser": {
-      "customerSupport": "Społeczność",
-      "documentation": "Dokumentacja",
       "appTheme": "Przełącz motyw",
       "accounts": "Konta",
       "signIn": "Zaloguj się",
@@ -422,8 +419,6 @@
       "spam": "Spam",
       "archive": "Archiwum",
       "bin": "Kosz",
-      "livesupport": "Wsparcie na żywo",
-      "feedback": "Opinie",
       "settings": "Ustawienia",
       "voice": "Asystent głosowy",
       "snoozed": "Odłożone"

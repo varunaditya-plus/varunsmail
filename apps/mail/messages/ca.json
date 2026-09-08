@@ -89,7 +89,6 @@
         "searchEmails": "Buscar correus",
         "toggleTheme": "Canvia el tema",
         "backToMail": "Tornar al correu",
-        "goToDocs": "Anar a la documentació",
         "helpWithShortcuts": "Ajuda amb les dreceres",
         "commandPalette": "Paleta de comandes"
       },
@@ -134,8 +133,6 @@
       "aiEnhancedQuery": "Consulta de cerca millorada"
     },
     "navUser": {
-      "customerSupport": "Comunitat",
-      "documentation": "Documentació",
       "appTheme": "Canvia el tema",
       "accounts": "Comptes",
       "signIn": "Iniciar la sessió",
@@ -422,8 +419,6 @@
       "spam": "Contingut no desitjat",
       "archive": "Arxivats",
       "bin": "Paperera",
-      "livesupport": "Suport en directe",
-      "feedback": "Feedback",
       "settings": "Configuració",
       "voice": "Assistent de veu",
       "snoozed": "Posposat"
