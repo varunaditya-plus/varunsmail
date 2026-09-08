@@ -1,12 +1,3 @@
-import {
-  AIWritingAssistantEmail,
-  AutoLabelingEmail,
-  CategoriesEmail,
-  Mail0ProEmail,
-  ShortcutsEmail,
-  SuperSearchEmail,
-  WelcomeEmail,
-} from './react-emails/email-sequences';
 import { createAuthMiddleware, phoneNumber, jwt, bearer, mcp } from 'better-auth/plugins';
 import { type Account, betterAuth, type BetterAuthOptions } from 'better-auth';
 import { getBrowserTimezone, isValidTimezone } from './timezones';
@@ -22,71 +13,8 @@ import { type EProviders } from '../types';
 import { createDriver } from './driver';
 import { Autumn } from 'autumn-js';
 import { createDb } from '../db';
-import { Effect } from 'effect';
 import { env } from '../env';
 import { Dub } from 'dub';
-
-const scheduleCampaign = (userInfo: { address: string; name: string }) =>
-  Effect.gen(function* () {
-    const name = userInfo.name || 'there';
-    const resendService = resend();
-
-    const sendEmail = (subject: string, react: unknown, scheduledAt?: string) =>
-      Effect.promise(() =>
-        resendService.emails
-          .send({
-            from: '0.email <onboarding@0.email>',
-            to: userInfo.address,
-            subject,
-            react: react as any,
-            ...(scheduledAt && { scheduledAt }),
-          })
-          .then(() => void 0),
-      );
-
-    const emails = [
-      {
-        subject: 'Welcome to 0.email',
-        react: WelcomeEmail({ name }),
-        scheduledAt: undefined,
-      },
-      {
-        subject: 'Mail0 Pro is here 🚀💼',
-        react: Mail0ProEmail({ name }),
-        scheduledAt: 'in 1 day',
-      },
-      {
-        subject: 'Auto-labeling is here 🎉📥',
-        react: AutoLabelingEmail({ name }),
-        scheduledAt: 'in 2 days',
-      },
-      {
-        subject: 'AI Writing Assistant is here 🤖💬',
-        react: AIWritingAssistantEmail({ name }),
-        scheduledAt: 'in 3 days',
-      },
-      {
-        subject: 'Shortcuts are here 🔧🚀',
-        react: ShortcutsEmail({ name }),
-        scheduledAt: 'in 4 days',
-      },
-      {
-        subject: 'Categories are here 📂🔍',
-        react: CategoriesEmail({ name }),
-        scheduledAt: 'in 5 days',
-      },
-      {
-        subject: 'Super Search is here 🔍🚀',
-        react: SuperSearchEmail({ name }),
-        scheduledAt: 'in 6 days',
-      },
-    ];
-
-    yield* Effect.all(
-      emails.map((email) => sendEmail(email.subject, email.react, email.scheduledAt)),
-      { concurrency: 'unbounded' },
-    );
-  });
 
 const connectionHandlerHook = async (account: Account) => {
   if (!account.accessToken || !account.refreshToken) {
@@ -142,12 +70,6 @@ const connectionHandlerHook = async (account: Account) => {
     userInfo.address,
     updatingInfo,
   );
-
-  if (env.NODE_ENV === 'production') {
-    await Effect.runPromise(
-      scheduleCampaign({ address: userInfo.address, name: userInfo.name || 'there' }),
-    );
-  }
 
   if (env.GOOGLE_S_ACCOUNT && env.GOOGLE_S_ACCOUNT !== '{}') {
     await env.subscribe_queue.send({
