@@ -40,6 +40,7 @@ interface NavMainProps {
     items: NavItemProps[];
     isActive?: boolean;
   }[];
+  isBottomNav?: boolean;
 }
 
 type IconRefType = SVGSVGElement & {
@@ -47,7 +48,7 @@ type IconRefType = SVGSVGElement & {
   stopAnimation?: () => void;
 };
 
-export function NavMain({ items }: NavMainProps) {
+export function NavMain({ items, isBottomNav = false }: NavMainProps) {
   const location = useLocation();
   const pathname = location.pathname;
   const searchParams = new URLSearchParams();
