@@ -1,8 +1,9 @@
 import { and, eq } from 'drizzle-orm';
 import { load } from 'cheerio';
 
+import { normalizeTrackingUrl } from './email-processor';
 import type { IGetThreadResponse } from './driver/types';
-import { connection } from '../db/schema';
+import { connection, userSettings } from '../db/schema';
 import type { ZeroEnv } from '../env';
 import { createDb } from '../db';
 
@@ -58,8 +59,8 @@ const compareAssets = (a: MailboxAsset, b: MailboxAsset) => {
   return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 };
 
-function safeLink(value: string) {
-  const trimmed = value.trim();
+function safeLink(value: string, trackingProtection: boolean) {
+  const trimmed = normalizeTrackingUrl(value.trim(), trackingProtection);
   if (!trimmed || trimmed.length > 4096) return;
   try {
     const parsed = new URL(trimmed);
@@ -71,20 +72,20 @@ function safeLink(value: string) {
   }
 }
 
-function messageLinks(...sources: string[]) {
+export function extractMailboxLinks(sources: string[], trackingProtection: boolean) {
   const links = new Map<string, { url: string; host: string; title: string }>();
   for (const source of sources) {
     if (!source) continue;
     const $ = load(source);
     $('a[href]').each((_, element) => {
-      const link = safeLink($(element).attr('href') ?? '');
+      const link = safeLink($(element).attr('href') ?? '', trackingProtection);
       if (!link || links.has(link.url)) return;
       const title = $(element).text().replace(/\s+/g, ' ').trim().slice(0, 160);
       links.set(link.url, { ...link, title: title || link.host });
     });
     const text = $.root().text();
     for (const match of text.matchAll(/https?:\/\/[^\s<>"']+/gi)) {
-      const link = safeLink(match[0].replace(/[),.;!?\]}]+$/, ''));
+      const link = safeLink(match[0].replace(/[),.;!?\]}]+$/, ''), trackingProtection);
       if (link && !links.has(link.url)) links.set(link.url, { ...link, title: link.host });
     }
   }
@@ -129,6 +130,7 @@ async function readThreadAssets(
   env: ZeroEnv,
   mailbox: { id: string; email: string },
   key: string,
+  trackingProtection: boolean,
 ) {
   const attachments = new Map<string, MailboxAttachmentAsset>();
   const links = new Map<string, MailboxLinkAsset>();
@@ -165,10 +167,9 @@ async function readThreadAssets(
         size: Math.max(0, attachment.size || 0),
       });
     }
-    const extractedLinks = messageLinks(
-      message.decodedBody ?? '',
-      message.processedHtml ?? '',
-      message.body ?? '',
+    const extractedLinks = extractMailboxLinks(
+      [message.decodedBody ?? '', message.processedHtml ?? '', message.body ?? ''],
+      trackingProtection,
     );
     for (let linkIndex = 0; linkIndex < extractedLinks.length; linkIndex++) {
       const link = extractedLinks[linkIndex]!;
@@ -207,13 +208,17 @@ export async function listMailboxAssets(
   input: ListMailboxAssetsInput = {},
 ) {
   const { db } = createDb(env.DB);
-  const mailboxes = await db.query.connection.findMany({
-    where: input.connectionId
-      ? and(eq(connection.userId, userId), eq(connection.id, input.connectionId))
-      : eq(connection.userId, userId),
-    columns: { id: true, email: true },
-  });
+  const [mailboxes, settings] = await Promise.all([
+    db.query.connection.findMany({
+      where: input.connectionId
+        ? and(eq(connection.userId, userId), eq(connection.id, input.connectionId))
+        : eq(connection.userId, userId),
+      columns: { id: true, email: true },
+    }),
+    db.query.userSettings.findFirst({ where: eq(userSettings.userId, userId) }),
+  ]);
   if (input.connectionId && !mailboxes.length) throw new Error('Mailbox connection not found');
+  const trackingProtection = settings?.settings.trackingProtection ?? true;
 
   const objects = (await Promise.all(mailboxes.map((mailbox) => listThreadObjects(env, mailbox))))
     .flat()
@@ -225,7 +230,7 @@ export async function listMailboxAssets(
       ...(await Promise.all(
         selectedObjects
           .slice(offset, offset + 25)
-          .map(({ mailbox, key }) => readThreadAssets(env, mailbox, key)),
+          .map(({ mailbox, key }) => readThreadAssets(env, mailbox, key, trackingProtection)),
       )),
     );
   }

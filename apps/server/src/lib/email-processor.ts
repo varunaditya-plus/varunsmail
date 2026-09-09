@@ -67,16 +67,17 @@ function unwrapRedirectUrl(value: string) {
 
   const host = wrapper.hostname.toLowerCase();
   const path = wrapper.pathname.toLowerCase();
+  // Keep security gateways intact so their time-of-click protection still runs.
+  if (
+    host === 'safelinks.protection.outlook.com' ||
+    host.endsWith('.safelinks.protection.outlook.com')
+  ) {
+    return null;
+  }
   let destination: string | null = null;
 
   if ((host === 'google.com' || host === 'www.google.com') && path === '/url') {
     destination = wrapper.searchParams.get('q') || wrapper.searchParams.get('url');
-  } else if (
-    (host === 'safelinks.protection.outlook.com' ||
-      host.endsWith('.safelinks.protection.outlook.com')) &&
-    path === '/'
-  ) {
-    destination = wrapper.searchParams.get('url');
   } else if ((host === 'l.facebook.com' || host === 'lm.facebook.com') && path === '/l.php') {
     destination = wrapper.searchParams.get('u');
   } else if (
@@ -91,6 +92,10 @@ function unwrapRedirectUrl(value: string) {
   // Keep unknown wrappers and non-web destinations intact.
   const safeDestination = destination && parseHttpUrl(destination);
   return safeDestination?.toString() || null;
+}
+
+export function normalizeTrackingUrl(value: string, trackingProtection: boolean) {
+  return trackingProtection ? unwrapRedirectUrl(value) || value : value;
 }
 
 function protectEmailHtml(html: string) {
@@ -117,8 +122,9 @@ function protectEmailHtml(html: string) {
 
   $('a[href]').each((_, el) => {
     const $link = $(el);
-    const destination = unwrapRedirectUrl($link.attr('href') || '');
-    if (destination) $link.attr('href', destination);
+    const href = $link.attr('href') || '';
+    const destination = normalizeTrackingUrl(href, true);
+    if (destination !== href) $link.attr('href', destination);
   });
 
   return { html: $.html(), blockedTrackerCount };

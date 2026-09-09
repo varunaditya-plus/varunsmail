@@ -56,7 +56,9 @@ describe('email tracking protection', () => {
     const result = processEmailHtml({ html, ...options, trackingProtection: true });
 
     expect(result.processedHtml).toContain('href="https://example.com/story?a=1"');
-    expect(result.processedHtml).toContain('href="https://example.org/docs"');
+    expect(result.processedHtml).toContain(
+      'href="https://nam01.safelinks.protection.outlook.com/?url=https%3A%2F%2Fexample.org%2Fdocs&amp;data=abc"',
+    );
     expect(result.processedHtml).toContain(
       'href="https://www.google.com/url?q=javascript%3Aalert(1)"',
     );
