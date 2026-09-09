@@ -4,7 +4,7 @@ vi.mock('./server-utils', () => ({ connectionToDriver: vi.fn(), getThreadsFromDB
 
 import { mailboxWorkflowInternals } from './mailbox-workflows';
 
-const { cleanupCandidateSampleLimit, isCleanupThreadEligible, takeCleanupRunBatch } =
+const { cleanupCandidateSampleLimit, isCleanupThreadEligible, selectCleanupRunBatch } =
   mailboxWorkflowInternals;
 
 describe('sender cleanup safety', () => {
@@ -42,10 +42,20 @@ describe('sender cleanup safety', () => {
     expect(isCleanupThreadEligible({ messages: [{ receivedOn: 'unknown' }] }, cutoff)).toBe(false);
   });
 
-  it('caps each cleanup run at twenty threads', () => {
-    const ids = Array.from({ length: 30 }, (_, index) => `thread-${index}`);
+  it('scans past ineligible matches and caps each cleanup run at twenty threads', () => {
+    const cutoff = new Date('2026-09-09T12:00:00.000Z');
+    const active = Array.from({ length: 20 }, (_, index) => ({
+      threadId: `active-${index}`,
+      thread: { messages: [{ receivedOn: '2026-09-09T12:00:00.001Z' }] },
+    }));
+    const eligible = Array.from({ length: 25 }, (_, index) => ({
+      threadId: `eligible-${index}`,
+      thread: { messages: [{ receivedOn: '2026-09-08T12:00:00.000Z' }] },
+    }));
 
-    expect(takeCleanupRunBatch(ids)).toEqual(ids.slice(0, 20));
+    expect(selectCleanupRunBatch([...active, ...eligible], cutoff)).toEqual(
+      eligible.slice(0, 20).map(({ threadId }) => threadId),
+    );
   });
 
   it('caps the recent candidate sample across any number of mailboxes', () => {

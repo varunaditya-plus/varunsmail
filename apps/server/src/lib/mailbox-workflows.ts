@@ -56,6 +56,7 @@ const REMINDER_LABEL = 'Varunsmail/Reminded';
 const MAX_CRON_ATTEMPTS = 8;
 const CLEANUP_CANDIDATE_SAMPLE_SIZE = 100;
 const CLEANUP_RUN_BATCH_SIZE = 20;
+const CLEANUP_RUN_SCAN_SIZE = 100;
 const focusLabelIds = new Map<string, string | null>();
 
 type Connection = typeof connection.$inferSelect;
@@ -99,8 +100,15 @@ function isCleanupThreadEligible(
   return latestReceivedAt !== undefined && latestReceivedAt <= cutoff.getTime();
 }
 
-function takeCleanupRunBatch(threadIds: string[]) {
-  return threadIds.slice(0, CLEANUP_RUN_BATCH_SIZE);
+function selectCleanupRunBatch(
+  threads: { threadId: string; thread: { messages: { isDraft?: boolean; receivedOn: string }[] } }[],
+  cutoff: Date,
+  limit = CLEANUP_RUN_BATCH_SIZE,
+) {
+  return threads
+    .filter(({ thread }) => isCleanupThreadEligible(thread, cutoff))
+    .slice(0, Math.max(0, limit))
+    .map(({ threadId }) => threadId);
 }
 
 function cleanupCandidateSampleLimit(mailboxIndex: number, mailboxCount: number) {
@@ -493,19 +501,34 @@ export class MailboxWorkflows {
     const query = `from:"${sender}"${rule.ageDays ? ` older_than:${rule.ageDays}d` : ''}`;
     const cutoff = new Date(Date.now() - rule.ageDays * 86_400_000);
     try {
-      const page = await driver.list({ folder: 'inbox', query, maxResults: CLEANUP_RUN_BATCH_SIZE });
-      const ids = takeCleanupRunBatch(page.threads.map(({ id }) => id));
+      const page = await driver.list({ folder: 'inbox', query, maxResults: CLEANUP_RUN_SCAN_SIZE });
+      const ids = page.threads.map(({ id }) => id);
 
       const change =
         rule.action === 'trash'
           ? { addLabels: ['TRASH'], removeLabels: ['INBOX'] }
           : { addLabels: [], removeLabels: ['INBOX'] };
       let changed = 0;
-      for (let offset = 0; offset < ids.length; offset += 4) {
+      let fetchedCount = 0;
+      let fetchFailureCount = 0;
+      let firstFetchFailure: unknown;
+      for (let offset = 0; offset < ids.length && changed < CLEANUP_RUN_BATCH_SIZE; offset += 4) {
+        const fetched = await Promise.allSettled(
+          ids
+            .slice(offset, offset + 4)
+            .map(async (threadId) => ({ threadId, thread: await driver.get(threadId) })),
+        );
+        const fetchFailures = fetched.filter((result) => result.status === 'rejected');
+        if (!fetchFailureCount && fetchFailures[0]) firstFetchFailure = fetchFailures[0].reason;
+        fetchFailureCount += fetchFailures.length;
+        fetchedCount += fetched.length - fetchFailures.length;
+        const eligibleIds = selectCleanupRunBatch(
+          fetched.flatMap((result) => (result.status === 'fulfilled' ? [result.value] : [])),
+          cutoff,
+          CLEANUP_RUN_BATCH_SIZE - changed,
+        );
         const results = await Promise.allSettled(
-          ids.slice(offset, offset + 4).map(async (threadId) => {
-            const thread = await driver.get(threadId);
-            if (!isCleanupThreadEligible(thread, cutoff)) return false;
+          eligibleIds.map(async (threadId) => {
             await mutateAndReconcile(this.env, mailbox, threadId, change);
             return true;
           }),
@@ -514,6 +537,7 @@ export class MailboxWorkflows {
         const failure = results.find((result) => result.status === 'rejected');
         if (failure?.status === 'rejected') throw failure.reason;
       }
+      if (!fetchedCount && fetchFailureCount) throw firstFetchFailure;
       await recordMailboxAction(this.env, {
         userId: this.userId,
         connectionId: mailbox.id,
@@ -1750,5 +1774,5 @@ export const mailboxWorkflowInternals = {
   processCleanupRules,
   processDueBundles,
   processDueReminders,
-  takeCleanupRunBatch,
+  selectCleanupRunBatch,
 };
