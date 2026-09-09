@@ -43,6 +43,11 @@ import { publicRouter } from './routes/auth';
 import { WorkflowRunner } from './pipelines';
 import { consumeGmailPollJob, gmailPollFailure } from './lib/gmail-poll-state';
 import { processMailboxWorkflowCron } from './lib/mailbox-workflows';
+import {
+  parseOutboxState,
+  recordMailboxAction,
+  writeOutboxState,
+} from './lib/mailbox-activity';
 import { initTracing } from './lib/tracing';
 import { env, type ZeroEnv } from './env';
 import type { HonoContext } from './ctx';
@@ -942,8 +947,8 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
             const { pending_emails_status: statusKV, pending_emails_payload: payloadKV } = this
               .env as { pending_emails_status: KVNamespace; pending_emails_payload: KVNamespace };
 
-            const status = await statusKV.get(messageId);
-            if (status === 'cancelled') {
+            const state = parseOutboxState(await statusKV.get(messageId));
+            if (state.status === 'cancelled') {
               console.log(`Email ${messageId} cancelled – skipping send.`);
               return;
             }
@@ -953,6 +958,18 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
               const stored = await payloadKV.get(messageId);
               if (!stored) {
                 console.error(`No payload found for scheduled email ${messageId}`);
+                await writeOutboxState(statusKV, messageId, {
+                  status: 'failed',
+                  attempts: Number(msg.attempts ?? 1),
+                  error: 'Message payload is missing',
+                });
+                await recordMailboxAction(this.env, {
+                  connectionId,
+                  messageId,
+                  action: 'send email',
+                  status: 'failed',
+                  detail: 'Message payload is missing',
+                });
                 return;
               }
               payload = JSON.parse(stored);
@@ -993,11 +1010,47 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
 
               await statusKV.delete(messageId);
               await payloadKV.delete(messageId);
+              await recordMailboxAction(this.env, {
+                connectionId,
+                messageId,
+                action: 'send email',
+                status: 'succeeded',
+              });
               console.log(`Email ${messageId} sent successfully`);
             } catch (error) {
               console.error(`Failed to send scheduled email ${messageId}:`, error);
-              await statusKV.delete(messageId);
-              await payloadKV.delete(messageId);
+              const attempts = Number(msg.attempts ?? state.attempts ?? 1);
+              const detail = error instanceof Error ? error.message : String(error);
+              if (attempts < 3 && typeof msg.retry === 'function') {
+                await writeOutboxState(statusKV, messageId, {
+                  ...state,
+                  status: 'retrying',
+                  attempts,
+                  error: detail.slice(0, 300),
+                });
+                await recordMailboxAction(this.env, {
+                  connectionId,
+                  messageId,
+                  action: 'send email',
+                  status: 'pending',
+                  detail: `Retry ${attempts} of 3`,
+                });
+                msg.retry({ delaySeconds: Math.min(300, 30 * 2 ** attempts) });
+                return;
+              }
+              await writeOutboxState(statusKV, messageId, {
+                ...state,
+                status: 'failed',
+                attempts,
+                error: detail.slice(0, 300),
+              });
+              await recordMailboxAction(this.env, {
+                connectionId,
+                messageId,
+                action: 'send email',
+                status: 'failed',
+                detail,
+              });
             }
           }),
         );

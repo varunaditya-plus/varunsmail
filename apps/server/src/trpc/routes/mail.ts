@@ -18,6 +18,7 @@ import { activeDriverProcedure, router, privateProcedure } from '../trpc';
 import { processEmailHtml } from '../../lib/email-processor';
 import { listMailboxThreads } from '../../lib/mailbox-list';
 import { runMailboxChanges } from '../../lib/mailbox-changes';
+import { recordMailboxAction, writeOutboxState } from '../../lib/mailbox-activity';
 import {
   decodeUnifiedInboxCursor,
   mergeUnifiedInboxPages,
@@ -571,8 +572,11 @@ export const mailRouter = router({
         } = env;
 
         try {
-          await statusKV.put(messageId, 'pending', {
-            expirationTtl: pendingTtl,
+          await writeOutboxState(statusKV, messageId, {
+            status: 'pending',
+            sendAt: targetTime,
+            createdAt: Date.now(),
+            attempts: 0,
           });
         } catch (error) {
           console.error(`Failed to write pending status to KV for message ${messageId}`, error);
@@ -628,6 +632,14 @@ export const mailRouter = router({
           }
         }
 
+        await recordMailboxAction(env, {
+          userId: sessionUser.id,
+          connectionId: mailbox.id,
+          messageId,
+          action: 'send email',
+          status: 'pending',
+          detail: scheduleAt ? 'Scheduled' : 'Undo-send window',
+        });
         ctx.c.executionCtx.waitUntil(afterTask());
 
         if (isLongTerm) {
@@ -644,10 +656,29 @@ export const mailRouter = router({
         ),
       } as typeof mail & { attachments: any[] };
 
-      if (draftId) {
-        await agent.stub.sendDraft(draftId, mailWithAttachments);
-      } else {
-        await agent.stub.create(mailWithAttachments);
+      try {
+        if (draftId) {
+          await agent.stub.sendDraft(draftId, mailWithAttachments);
+        } else {
+          await agent.stub.create(mailWithAttachments);
+        }
+        await recordMailboxAction(env, {
+          userId: sessionUser.id,
+          connectionId: mailbox.id,
+          threadId: input.threadId,
+          action: input.threadId ? 'reply' : 'send email',
+          status: 'succeeded',
+        });
+      } catch (error) {
+        await recordMailboxAction(env, {
+          userId: sessionUser.id,
+          connectionId: mailbox.id,
+          threadId: input.threadId,
+          action: input.threadId ? 'reply' : 'send email',
+          status: 'failed',
+          detail: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
       }
 
       console.log('[send] input.threadId:', input);
@@ -702,12 +733,20 @@ export const mailRouter = router({
         }
       }
 
-      await statusKV.put(messageId, 'cancelled', {
-        expirationTtl: 60 * 60,
+      await writeOutboxState(statusKV, messageId, {
+        status: 'cancelled',
+        createdAt: Date.now(),
       });
 
       await payloadKV.delete(messageId);
       await scheduledKV.delete(messageId); // Clean up long-term schedule if it exists
+
+      await recordMailboxAction(env, {
+        userId: ctx.sessionUser.id,
+        messageId,
+        action: 'send email',
+        status: 'cancelled',
+      });
 
       return { success: true };
     }),

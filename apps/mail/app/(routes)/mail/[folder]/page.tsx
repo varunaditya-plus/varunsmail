@@ -4,6 +4,7 @@ import { MailLayout } from '@/components/mail/mail';
 import { FocusReply } from '@/components/mail/focus-reply';
 import { MailBundles } from '@/components/mail/mail-bundles';
 import { MailRules } from '@/components/mail/mail-rules';
+import { MailboxActivity } from '@/components/mail/mailbox-activity';
 import { SenderScreening } from '@/components/mail/sender-screening';
 import { useLabels } from '@/hooks/use-labels';
 import { authProxy } from '@/lib/auth-proxy';
@@ -23,6 +24,7 @@ const ALLOWED_FOLDERS = new Set([
   'bundles',
   'focus',
   'rules',
+  'activity',
 ]);
 
 type LabelNode = { id?: string; labels?: LabelNode[] };
@@ -95,5 +97,6 @@ export default function MailPage() {
   if (folder === 'bundles') return <MailBundles />;
   if (folder === 'focus') return <FocusReply />;
   if (folder === 'rules') return <MailRules />;
+  if (folder === 'activity') return <MailboxActivity />;
   return <MailLayout />;
 }

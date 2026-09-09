@@ -21,6 +21,28 @@ const deliveryTimes = z.array(z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/));
 
 const service = (userId: string) => new MailboxWorkflows(env, userId);
 
+const activityRouter = router({
+  list: privateProcedure.query(async ({ ctx }) => service(ctx.sessionUser.id).getActivity()),
+  outbox: privateProcedure.query(async ({ ctx }) => ({
+    messages: await service(ctx.sessionUser.id).getOutbox(),
+  })),
+  forceSync: privateProcedure
+    .input(z.object({ connectionId: z.string().min(1) }))
+    .mutation(async ({ ctx, input }) =>
+      service(ctx.sessionUser.id).forceSync(input.connectionId),
+    ),
+  retryOutbox: privateProcedure
+    .input(z.object({ messageId: z.string().min(1) }))
+    .mutation(async ({ ctx, input }) =>
+      service(ctx.sessionUser.id).retryOutbox(input.messageId),
+    ),
+  cancelOutbox: privateProcedure
+    .input(z.object({ messageId: z.string().min(1) }))
+    .mutation(async ({ ctx, input }) =>
+      service(ctx.sessionUser.id).cancelOutbox(input.messageId),
+    ),
+});
+
 const remindersRouter = router({
   list: privateProcedure
     .input(z.object({ connectionId: z.string().min(1).optional() }).optional())
@@ -180,6 +202,7 @@ const focusRouter = router({
 });
 
 export const mailboxWorkflowsRouter = router({
+  activity: activityRouter,
   reminders: remindersRouter,
   screening: screeningRouter,
   rules: rulesRouter,

@@ -592,6 +592,53 @@ export const focusThread = createTable(
   ],
 );
 
+export const mailboxSyncStatus = createTable(
+  'mailbox_sync_status',
+  {
+    connectionId: text('connection_id')
+      .primaryKey()
+      .references(() => connection.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    status: text('status').$type<'syncing' | 'healthy' | 'error'>().notNull(),
+    lastAttemptAt: integer('last_attempt_at', { mode: 'timestamp_ms' }).notNull(),
+    lastSuccessAt: integer('last_success_at', { mode: 'timestamp_ms' }),
+    lastError: text('last_error'),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+  },
+  (t) => [index('mail0_mailbox_sync_status_user_idx').on(t.userId, t.status)],
+);
+
+export const mailboxAction = createTable(
+  'mailbox_action',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    connectionId: text('connection_id').references(() => connection.id, { onDelete: 'cascade' }),
+    threadId: text('thread_id'),
+    messageId: text('message_id'),
+    action: text('action').notNull(),
+    status: text('status').$type<'pending' | 'succeeded' | 'failed' | 'cancelled'>().notNull(),
+    detail: text('detail'),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+  },
+  (t) => [
+    index('mail0_mailbox_action_user_created_idx').on(t.userId, t.createdAt),
+    index('mail0_mailbox_action_message_idx').on(t.messageId),
+    index('mail0_mailbox_action_connection_idx').on(t.connectionId, t.createdAt),
+  ],
+);
+
 export const rateLimit = createTable('rate_limit', {
   id: text('id').primaryKey(),
   key: text('key').notNull().unique(),

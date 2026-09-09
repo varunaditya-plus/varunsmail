@@ -45,6 +45,7 @@ import {
 import type { IGetThreadResponse, IGetThreadsResponse, MailManager } from '../../lib/driver/types';
 import { connectionToDriver, getZeroSocketAgent, reSyncThread } from '../../lib/server-utils';
 import { applyGmailChange, refreshGmailThread } from '../../lib/gmail-mutations';
+import { describeLabelAction, recordMailboxAction } from '../../lib/mailbox-activity';
 import { queueGmailRefresh } from '../../lib/gmail-polling';
 import { runMailboxChanges } from '../../lib/mailbox-changes';
 import { encodeThreadCursor } from '../../lib/thread-cursor';
@@ -1298,6 +1299,15 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
       const { syncPending } = await applyGmailChange(this.env, this.name, threadId, () =>
         this.driver!.modifyLabels([threadId], { addLabels, removeLabels }),
       );
+      this.ctx.waitUntil(
+        recordMailboxAction(this.env, {
+          connectionId: this.name,
+          threadId,
+          action: describeLabelAction(addLabels, removeLabels),
+          status: 'succeeded',
+          detail: syncPending ? 'Gmail updated; local refresh queued' : undefined,
+        }).catch((error) => console.error('[MAILBOX_ACTIVITY] Could not record label action', error)),
+      );
 
       return {
         success: true,
@@ -1308,6 +1318,17 @@ export class ZeroDriver extends DurableObject<ZeroEnv> {
         syncPending,
       };
     } catch (error) {
+      this.ctx.waitUntil(
+        recordMailboxAction(this.env, {
+          connectionId: this.name,
+          threadId,
+          action: describeLabelAction(addLabels, removeLabels),
+          status: 'failed',
+          detail: error instanceof Error ? error.message : String(error),
+        }).catch((logError) =>
+          console.error('[MAILBOX_ACTIVITY] Could not record failed label action', logError),
+        ),
+      );
       console.error('Failed to modify thread labels in database:', error);
       throw error;
     }

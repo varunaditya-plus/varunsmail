@@ -37,6 +37,13 @@ import { and, asc, desc, eq, inArray, isNull, lte, or } from 'drizzle-orm';
 import type { IGetThreadResponse } from './driver/types';
 import { applyGmailChange } from './gmail-mutations';
 import { connectionToDriver } from './server-utils';
+import {
+  cancelOutbox,
+  listMailboxActivity,
+  listOutbox,
+  recordMailboxAction,
+  retryOutbox,
+} from './mailbox-activity';
 import { isValidTimezone } from './timezones';
 import type { ZeroEnv } from '../env';
 import { createDb } from '../db';
@@ -188,6 +195,49 @@ export class MailboxWorkflows {
     if (!mailbox) throw new Error('Mailbox connection not found');
     if (mailbox.providerId !== 'google') throw new Error('This workflow currently requires Gmail');
     return mailbox;
+  }
+
+  async getActivity() {
+    return listMailboxActivity(this.env, this.userId);
+  }
+
+  async getOutbox() {
+    return listOutbox(this.env, this.userId);
+  }
+
+  async forceSync(connectionId: string) {
+    const mailbox = await this.connection(connectionId);
+    const runner = this.env.WORKFLOW_RUNNER.get(
+      this.env.WORKFLOW_RUNNER.idFromName(`gmail-poll:${mailbox.id}`),
+    );
+    try {
+      await runner.pollMailbox(mailbox.id);
+      const imported = await runner.importInbox(mailbox.id);
+      await recordMailboxAction(this.env, {
+        userId: this.userId,
+        connectionId: mailbox.id,
+        action: 'sync mailbox',
+        status: 'succeeded',
+      });
+      return imported;
+    } catch (error) {
+      await recordMailboxAction(this.env, {
+        userId: this.userId,
+        connectionId: mailbox.id,
+        action: 'sync mailbox',
+        status: 'failed',
+        detail: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+  }
+
+  async retryOutbox(messageId: string) {
+    return retryOutbox(this.env, this.userId, messageId);
+  }
+
+  async cancelOutbox(messageId: string) {
+    return cancelOutbox(this.env, this.userId, messageId);
   }
 
   async listReminders(connectionId?: string) {

@@ -38,6 +38,7 @@ import { eq } from 'drizzle-orm';
 import { createDb } from '../db';
 import { Effect } from 'effect';
 import { applyMailboxWorkflowPolicy } from './mailbox-workflows';
+import { setMailboxSyncStatus } from './mailbox-activity';
 
 const getConnection = async (env: ZeroEnv, connectionId: string) => {
   const { db } = createDb(env.DB);
@@ -86,47 +87,58 @@ export async function pollGoogleMailbox(
 ) {
   const mailbox = await getConnection(env, connectionId);
   if (mailbox?.providerId !== 'google' || !mailbox.refreshToken) return;
-  const request = gmailRequest(env, mailbox.refreshToken);
-  const backfillCount = String(
-    Math.max(1, Math.min(100, Number(env.GMAIL_POLL_BACKFILL_COUNT) || 10)),
+  await setMailboxSyncStatus(env, connectionId, 'syncing').catch((error) =>
+    console.error('[GMAIL_POLL] Could not record sync start', error),
   );
-  await pollGmailChanges({
-    connectionId,
-    readState: () => storage.get<GmailPollState>('gmail-poll-state'),
-    saveState: (state) => storage.put('gmail-poll-state', state),
-    profile: () => request('profile'),
-    history: (historyId, pageToken) =>
-      request('history', { startHistoryId: historyId, pageToken, maxResults: '100' }),
-    threads: (pageToken) =>
-      request('threads', { pageToken, maxResults: backfillCount, includeSpamTrash: 'true' }),
-    cachedThreads: async (cursor) => {
-      const prefix = `${connectionId}/`;
-      const page = await env.THREADS_BUCKET.list({ prefix, cursor, limit: Number(backfillCount) });
-      return {
-        ids: page.objects
-          .filter(({ key }) => key.endsWith('.json'))
-          .map(({ key }) => key.slice(prefix.length, -5)),
-        cursor: page.truncated ? page.cursor : undefined,
-      };
-    },
-    enqueue: async (jobs) => {
-      await env.thread_queue.sendBatch(jobs.map((body) => ({ body, contentType: 'json' })));
-    },
-    enqueueHistory: async (jobs) => {
-      await env.gmail_sync_queue.sendBatch(jobs.map((body) => ({ body, contentType: 'json' })));
-    },
-    canBackfill: async () => {
-      try {
-        const [cache, index] = await Promise.all([
-          env.thread_queue.metrics(),
-          env.gmail_index_queue.metrics(),
-        ]);
-        return cache.backlogCount < 1000 && index.backlogCount < 100;
-      } catch {
-        return false;
-      }
-    },
-  });
+  try {
+    const request = gmailRequest(env, mailbox.refreshToken);
+    const backfillCount = String(
+      Math.max(1, Math.min(100, Number(env.GMAIL_POLL_BACKFILL_COUNT) || 10)),
+    );
+    await pollGmailChanges({
+      connectionId,
+      readState: () => storage.get<GmailPollState>('gmail-poll-state'),
+      saveState: (state) => storage.put('gmail-poll-state', state),
+      profile: () => request('profile'),
+      history: (historyId, pageToken) =>
+        request('history', { startHistoryId: historyId, pageToken, maxResults: '100' }),
+      threads: (pageToken) =>
+        request('threads', { pageToken, maxResults: backfillCount, includeSpamTrash: 'true' }),
+      cachedThreads: async (cursor) => {
+        const prefix = `${connectionId}/`;
+        const page = await env.THREADS_BUCKET.list({ prefix, cursor, limit: Number(backfillCount) });
+        return {
+          ids: page.objects
+            .filter(({ key }) => key.endsWith('.json'))
+            .map(({ key }) => key.slice(prefix.length, -5)),
+          cursor: page.truncated ? page.cursor : undefined,
+        };
+      },
+      enqueue: async (jobs) => {
+        await env.thread_queue.sendBatch(jobs.map((body) => ({ body, contentType: 'json' })));
+      },
+      enqueueHistory: async (jobs) => {
+        await env.gmail_sync_queue.sendBatch(jobs.map((body) => ({ body, contentType: 'json' })));
+      },
+      canBackfill: async () => {
+        try {
+          const [cache, index] = await Promise.all([
+            env.thread_queue.metrics(),
+            env.gmail_index_queue.metrics(),
+          ]);
+          return cache.backlogCount < 1000 && index.backlogCount < 100;
+        } catch {
+          return false;
+        }
+      },
+    });
+    await setMailboxSyncStatus(env, connectionId, 'healthy');
+  } catch (error) {
+    await setMailboxSyncStatus(env, connectionId, 'error', error).catch((statusError) =>
+      console.error('[GMAIL_POLL] Could not record sync failure', statusError),
+    );
+    throw error;
+  }
 }
 
 type ShardClient = Awaited<ReturnType<typeof getZeroAgent>>;

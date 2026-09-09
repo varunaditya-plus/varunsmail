@@ -15,7 +15,15 @@ import {
   LockIcon,
   Clock,
 } from '@/components/icons/icons';
-import { ListFilter, ListTodo, MailCheck, Mails, MessageSquareIcon, PackageOpen } from 'lucide-react';
+import {
+  Activity,
+  ListFilter,
+  ListTodo,
+  MailCheck,
+  Mails,
+  MessageSquareIcon,
+  PackageOpen,
+} from 'lucide-react';
 import { m } from '@/paraglide/messages';
 
 export interface NavItem {
@@ -104,6 +112,12 @@ export const navigationConfig: Record<string, NavConfig> = {
             title: 'Rules',
             url: '/mail/rules',
             icon: ListFilter,
+          },
+          {
+            id: 'activity',
+            title: 'Sync & activity',
+            url: '/mail/activity',
+            icon: Activity,
           },
         ],
       },
