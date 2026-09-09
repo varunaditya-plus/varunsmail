@@ -49,6 +49,7 @@ import { useAtom } from 'jotai';
 const getListItemKey = (item: { id: string; connectionId?: string; key?: string }) =>
   item.key ?? threadKey(item.id, item.connectionId);
 const LOADING_ROWS = ['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot', 'golf', 'hotel'];
+const EMPTY_ACCOUNT_COLORS = {};
 
 const Thread = memo(
   function Thread({
@@ -56,7 +57,8 @@ const Thread = memo(
     onClick,
     isKeyboardFocused,
     index,
-  }: ThreadProps & { index?: number }) {
+    accountColors,
+  }: ThreadProps & { index?: number; accountColors: Record<string, string> }) {
     const [searchValue] = useSearchValue();
     const { folder } = useParams<{ folder: string }>();
     const [, threads] = useThreads();
@@ -333,7 +335,7 @@ const Thread = memo(
               {message.connectionId && message.account ? (
                 <span
                   className="h-2.5 w-2.5 shrink-0 rounded-full"
-                  style={{ backgroundColor: getAccountColor(message.connectionId) }}
+                  style={{ backgroundColor: getAccountColor(message.connectionId, accountColors) }}
                   aria-label={'Account ' + message.account.email}
                   title={message.account.email}
                 />
@@ -465,6 +467,7 @@ const Thread = memo(
       handleToggleImportant,
       message.connectionId,
       message.account,
+      accountColors,
       isGroupThread,
       isFolderSent,
       isFolderBin,
@@ -513,6 +516,7 @@ const Thread = memo(
       getListItemKey(prev.message) === getListItemKey(next.message) &&
       prev.isKeyboardFocused === next.isKeyboardFocused &&
       prev.index === next.index &&
+      prev.accountColors === next.accountColors &&
       Object.is(prev.onClick, next.onClick);
     return isSameMessage;
   },
@@ -898,24 +902,27 @@ export const MailList = memo(
       };
     }, [loadMoreIfUnderfilled]);
 
-    const Comp = useMemo(() => (folder === FOLDERS.DRAFT ? Draft : Thread), [folder]);
+    const accountColors = settingsData?.settings.accountColors ?? EMPTY_ACCOUNT_COLORS;
 
     const vListRenderer = useCallback(
       (index: number) => {
         const item = filteredItems[index];
-        return item ? (
-          <Comp
+        if (!item) return <></>;
+        if (folder === FOLDERS.DRAFT) {
+          return <Draft key={getListItemKey(item)} message={item} index={index} />;
+        }
+        return (
+          <Thread
             key={getListItemKey(item)}
             message={item}
             isKeyboardFocused={focusedIndex === index && keyboardActive}
             index={index}
             onClick={handleMailClick}
+            accountColors={accountColors}
           />
-        ) : (
-          <></>
         );
       },
-      [Comp, filteredItems, focusedIndex, keyboardActive, handleMailClick],
+      [accountColors, filteredItems, focusedIndex, folder, keyboardActive, handleMailClick],
     );
 
     return (

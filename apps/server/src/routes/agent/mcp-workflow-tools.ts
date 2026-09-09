@@ -76,6 +76,7 @@ const userSettingsPatchSchema = z.object({
   quietHoursEnd: userSettingsSchema.shape.quietHoursEnd.removeDefault().optional(),
   notificationTimezone: userSettingsSchema.shape.notificationTimezone.optional(),
   hiddenSidebarItems: userSettingsSchema.shape.hiddenSidebarItems.removeDefault().optional(),
+  accountColors: userSettingsSchema.shape.accountColors.removeDefault().optional(),
 });
 
 function required<T>(value: T | null | undefined, name: string): T {

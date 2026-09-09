@@ -1,4 +1,13 @@
-const ACCOUNT_COLORS = ['#2563EB', '#7C3AED', '#DB2777', '#EA580C', '#059669', '#0891B2'];
+export const ACCOUNT_COLOR_OPTIONS = [
+  { name: 'Blue', value: '#2563EB' },
+  { name: 'Violet', value: '#7C3AED' },
+  { name: 'Pink', value: '#DB2777' },
+  { name: 'Orange', value: '#EA580C' },
+  { name: 'Green', value: '#059669' },
+  { name: 'Cyan', value: '#0891B2' },
+  { name: 'Red', value: '#DC2626' },
+  { name: 'Gold', value: '#CA8A04' },
+];
 const SHARED_GMAIL_LABELS = new Set([
   'CHAT',
   'SENT',
@@ -40,12 +49,15 @@ export function groupThreadKeys(keys: string[], fallbackConnectionId?: string | 
   return groups;
 }
 
-export function getAccountColor(connectionId: string) {
+export function getAccountColor(connectionId: string, accountColors?: Record<string, string>) {
+  const customColor = accountColors?.[connectionId];
+  if (customColor) return customColor;
+
   let hash = 0;
   for (let index = 0; index < connectionId.length; index++) {
     hash = (hash * 31 + connectionId.charCodeAt(index)) >>> 0;
   }
-  return ACCOUNT_COLORS[hash % ACCOUNT_COLORS.length]!;
+  return ACCOUNT_COLOR_OPTIONS[hash % ACCOUNT_COLOR_OPTIONS.length]!.value;
 }
 
 export function isSharedGmailLabel(labelId: string) {

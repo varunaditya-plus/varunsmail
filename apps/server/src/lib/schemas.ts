@@ -121,6 +121,7 @@ export const userSettingsSchema = z.object({
   quietHoursEnd: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/).default('07:00'),
   notificationTimezone: z.string().optional(),
   hiddenSidebarItems: z.string().array().default([]),
+  accountColors: z.record(z.string(), z.string().regex(/^#[0-9a-f]{6}$/i)).default({}),
 });
 
 export type UserSettings = z.infer<typeof userSettingsSchema>;
@@ -148,4 +149,5 @@ export const defaultUserSettings: UserSettings = {
   quietHoursStart: '22:00',
   quietHoursEnd: '07:00',
   hiddenSidebarItems: [],
+  accountColors: {},
 };
