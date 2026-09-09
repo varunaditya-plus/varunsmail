@@ -5,7 +5,7 @@ import type { ZeroEnv } from '../env';
 import { createDb } from '../db';
 
 export type OutboxState = {
-  status: 'pending' | 'retrying' | 'failed' | 'cancelled';
+  status: 'pending' | 'retrying' | 'failed' | 'cancelled' | 'sent';
   sendAt?: number;
   createdAt?: number;
   attempts?: number;
@@ -19,7 +19,7 @@ export function parseOutboxState(value: string | null): OutboxState {
   if (!value) return { status: 'pending' };
   try {
     const parsed = JSON.parse(value) as OutboxState;
-    if (parsed && ['pending', 'retrying', 'failed', 'cancelled'].includes(parsed.status)) {
+    if (parsed && ['pending', 'retrying', 'failed', 'cancelled', 'sent'].includes(parsed.status)) {
       return parsed;
     }
   } catch {
@@ -47,7 +47,7 @@ export function describeLabelAction(addLabels: string[], removeLabels: string[])
   return 'update thread';
 }
 
-export async function setMailboxSyncStatus(
+async function writeMailboxSyncStatus(
   env: ZeroEnv,
   connectionId: string,
   status: 'syncing' | 'healthy' | 'error',
@@ -83,18 +83,30 @@ export async function setMailboxSyncStatus(
     });
 }
 
-export async function recordMailboxAction(
+export async function setMailboxSyncStatus(
   env: ZeroEnv,
-  input: {
-    userId?: string;
-    connectionId?: string;
-    threadId?: string;
-    messageId?: string;
-    action: string;
-    status: 'pending' | 'succeeded' | 'failed' | 'cancelled';
-    detail?: string;
-  },
+  connectionId: string,
+  status: 'syncing' | 'healthy' | 'error',
+  error?: unknown,
 ) {
+  try {
+    await writeMailboxSyncStatus(env, connectionId, status, error);
+  } catch (writeError) {
+    console.error('[MAILBOX_ACTIVITY] Failed to record sync status', safeError(writeError));
+  }
+}
+
+type MailboxActionInput = {
+  userId?: string;
+  connectionId?: string;
+  threadId?: string;
+  messageId?: string;
+  action: string;
+  status: 'pending' | 'succeeded' | 'failed' | 'cancelled';
+  detail?: string;
+};
+
+async function writeMailboxAction(env: ZeroEnv, input: MailboxActionInput) {
   const { db } = createDb(env.DB);
   const userId =
     input.userId ??
@@ -135,6 +147,14 @@ export async function recordMailboxAction(
     updatedAt: now,
   });
   return id;
+}
+
+export async function recordMailboxAction(env: ZeroEnv, input: MailboxActionInput) {
+  try {
+    return await writeMailboxAction(env, input);
+  } catch (error) {
+    console.error('[MAILBOX_ACTIVITY] Failed to record mailbox action', safeError(error));
+  }
 }
 
 export async function listMailboxActivity(env: ZeroEnv, userId: string) {
@@ -189,7 +209,7 @@ export async function listOutbox(env: ZeroEnv, userId: string) {
         };
         if (!payload.connectionId || !owned.has(payload.connectionId)) continue;
         const state = parseOutboxState(await env.pending_emails_status.get(key.name));
-        if (state.status === 'cancelled') continue;
+        if (state.status === 'cancelled' || state.status === 'sent') continue;
         items.push({
           messageId: key.name,
           connectionId: payload.connectionId,

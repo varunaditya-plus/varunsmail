@@ -692,24 +692,28 @@ export const mailRouter = router({
         } else {
           await agent.stub.create(mailWithAttachments);
         }
-        await recordMailboxAction(env, {
+      } catch (error) {
+        ctx.c.executionCtx.waitUntil(
+          recordMailboxAction(env, {
+            userId: sessionUser.id,
+            connectionId: mailbox.id,
+            threadId: input.threadId,
+            action: input.threadId ? 'reply' : 'send email',
+            status: 'failed',
+            detail: error instanceof Error ? error.message : String(error),
+          }),
+        );
+        throw error;
+      }
+      ctx.c.executionCtx.waitUntil(
+        recordMailboxAction(env, {
           userId: sessionUser.id,
           connectionId: mailbox.id,
           threadId: input.threadId,
           action: input.threadId ? 'reply' : 'send email',
           status: 'succeeded',
-        });
-      } catch (error) {
-        await recordMailboxAction(env, {
-          userId: sessionUser.id,
-          connectionId: mailbox.id,
-          threadId: input.threadId,
-          action: input.threadId ? 'reply' : 'send email',
-          status: 'failed',
-          detail: error instanceof Error ? error.message : String(error),
-        });
-        throw error;
-      }
+        }),
+      );
 
       console.log('[send] input.threadId:', input);
 

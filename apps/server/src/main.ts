@@ -948,12 +948,18 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
               .env as { pending_emails_status: KVNamespace; pending_emails_payload: KVNamespace };
 
             const state = parseOutboxState(await statusKV.get(messageId));
-            if (state.status === 'cancelled') {
-              console.log(`Email ${messageId} cancelled – skipping send.`);
+            if (state.status === 'cancelled' || state.status === 'sent') {
+              console.log(`Email ${messageId} already ${state.status} – skipping send.`);
+              if (state.status === 'sent') {
+                await payloadKV.delete(messageId).catch((error) => {
+                  console.error(`Failed to clean sent payload ${messageId}`, error);
+                });
+              }
               return;
             }
 
             let payload = mail;
+            let serializedPayload: string | undefined;
             if (!payload) {
               const stored = await payloadKV.get(messageId);
               if (!stored) {
@@ -972,11 +978,35 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
                 });
                 return;
               }
-              payload = JSON.parse(stored);
+              serializedPayload = stored;
+              try {
+                payload = JSON.parse(stored);
+              } catch (error) {
+                console.error(`Invalid payload found for scheduled email ${messageId}`, error);
+                await writeOutboxState(statusKV, messageId, {
+                  status: 'failed',
+                  attempts: Number(msg.attempts ?? 1),
+                  error: 'Message payload is invalid',
+                });
+                await recordMailboxAction(this.env, {
+                  connectionId,
+                  messageId,
+                  action: 'send email',
+                  status: 'failed',
+                  detail: 'Message payload is invalid',
+                });
+                return;
+              }
+            } else {
+              try {
+                serializedPayload = JSON.stringify(payload);
+              } catch {
+                serializedPayload = undefined;
+              }
             }
 
-            const agent = await getZeroAgent(connectionId, this.ctx);
             try {
+              const agent = await getZeroAgent(connectionId, this.ctx);
               if (Array.isArray((payload as any).attachments)) {
                 const attachments = (payload as any).attachments;
 
@@ -1007,16 +1037,6 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
               } else {
                 await agent.stub.create(payload as any);
               }
-
-              await statusKV.delete(messageId);
-              await payloadKV.delete(messageId);
-              await recordMailboxAction(this.env, {
-                connectionId,
-                messageId,
-                action: 'send email',
-                status: 'succeeded',
-              });
-              console.log(`Email ${messageId} sent successfully`);
             } catch (error) {
               console.error(`Failed to send scheduled email ${messageId}:`, error);
               const attempts = Number(msg.attempts ?? state.attempts ?? 1);
@@ -1038,12 +1058,19 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
                 msg.retry({ delaySeconds: Math.min(300, 30 * 2 ** attempts) });
                 return;
               }
-              await writeOutboxState(statusKV, messageId, {
-                ...state,
-                status: 'failed',
-                attempts,
-                error: detail.slice(0, 300),
-              });
+              try {
+                await writeOutboxState(statusKV, messageId, {
+                  ...state,
+                  status: 'failed',
+                  attempts,
+                  error: detail.slice(0, 300),
+                });
+                if (serializedPayload) {
+                  await payloadKV.put(messageId, serializedPayload, { expirationTtl: 31_536_000 });
+                }
+              } catch (writeError) {
+                console.error(`Failed to retain failed outbox message ${messageId}`, writeError);
+              }
               await recordMailboxAction(this.env, {
                 connectionId,
                 messageId,
@@ -1051,7 +1078,30 @@ export default class Entry extends WorkerEntrypoint<ZeroEnv> {
                 status: 'failed',
                 detail,
               });
+              return;
             }
+
+            const attempts = Number(msg.attempts ?? state.attempts ?? 1);
+            try {
+              await writeOutboxState(statusKV, messageId, {
+                ...state,
+                status: 'sent',
+                attempts,
+                error: undefined,
+              });
+            } catch (error) {
+              console.error(`Failed to mark sent email ${messageId}`, error);
+            }
+            await payloadKV.delete(messageId).catch((error) => {
+              console.error(`Failed to clean sent payload ${messageId}`, error);
+            });
+            await recordMailboxAction(this.env, {
+              connectionId,
+              messageId,
+              action: 'send email',
+              status: 'succeeded',
+            });
+            console.log(`Email ${messageId} sent successfully`);
           }),
         );
         return;
