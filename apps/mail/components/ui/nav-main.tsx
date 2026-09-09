@@ -221,8 +221,9 @@ export function NavMain({
                                 key={id}
                                 checked={!hiddenItemIds.includes(id)}
                                 disabled={isVisibilitySaving}
-                                onCheckedChange={(checked) => {
-                                  void onItemVisibilityChange(id, checked === true);
+                                onSelect={(event) => {
+                                  event.preventDefault();
+                                  void onItemVisibilityChange(id, hiddenItemIds.includes(id));
                                 }}
                               >
                                 {item.title}
