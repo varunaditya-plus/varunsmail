@@ -32,6 +32,11 @@ export default function PrivacyPage() {
 
   const form = useForm<z.infer<typeof userSettingsSchema>>({
     resolver: zodResolver(userSettingsSchema),
+    defaultValues: {
+      externalImages: true,
+      trackingProtection: true,
+      trustedSenders: [],
+    },
   });
 
   const externalImages = data?.settings.externalImages;
