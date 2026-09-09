@@ -84,17 +84,17 @@ export function SenderCleanup() {
       return;
     }
     try {
-      const result = await createRule.mutateAsync({
+      const created = await createRule.mutateAsync({
         connectionId,
         senderEmail: senderEmail.trim().toLowerCase(),
         action,
         ageDays: days,
       });
-      await runRule.mutateAsync({ id: result.rule.id });
+      const result = await runRule.mutateAsync({ id: created.rule.id });
       await refresh();
       setOpen(false);
       setSenderEmail('');
-      toast.success('Cleanup rule created and applied');
+      toast.success(`Cleanup rule created · ${result.changed} cleaned this run`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Could not create cleanup rule');
     }
@@ -105,7 +105,7 @@ export function SenderCleanup() {
     try {
       const result = await runRule.mutateAsync({ id });
       await refresh();
-      toast.success(`${result.changed} ${result.changed === 1 ? 'thread' : 'threads'} cleaned`);
+      toast.success(`${result.changed} ${result.changed === 1 ? 'thread' : 'threads'} cleaned this run`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Cleanup failed');
     } finally {
@@ -143,7 +143,7 @@ export function SenderCleanup() {
           <p className="text-muted-foreground mb-1 text-sm">Inbox maintenance</p>
           <h1 className="text-2xl font-semibold tracking-tight">Sender cleanup</h1>
           <p className="text-muted-foreground mt-2 max-w-2xl text-sm">
-            Archive or move mail from frequent senders to Gmail Trash after a retention period.
+            Archive or move older inbox mail to Gmail Trash in safe daily batches.
           </p>
         </div>
         <Dialog open={open} onOpenChange={setOpen}>
@@ -155,7 +155,7 @@ export function SenderCleanup() {
           <DialogContent showOverlay className="sm:max-w-md">
             <DialogHeader>
               <DialogTitle>Create cleanup rule</DialogTitle>
-              <DialogDescription>The rule runs now, then once a day.</DialogDescription>
+              <DialogDescription>The rule checks exact message age and cleans up to 20 inbox threads now, then daily.</DialogDescription>
             </DialogHeader>
             <div className="space-y-4 py-2">
               <div className="space-y-2">
@@ -261,8 +261,8 @@ export function SenderCleanup() {
           <section className="mt-8 pb-8">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <h2 className="font-medium">Frequent senders</h2>
-                <p className="text-muted-foreground mt-1 text-xs">Based on up to 2,000 cached threads per account.</p>
+                <h2 className="font-medium">Recent senders</h2>
+                <p className="text-muted-foreground mt-1 text-xs">Based on a recent sample of up to 100 cached inbox threads across accounts.</p>
               </div>
               <div className="relative">
                 <Search className="text-muted-foreground absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2" />
@@ -283,7 +283,7 @@ export function SenderCleanup() {
                     <span className="bg-muted flex h-9 w-9 shrink-0 items-center justify-center rounded-lg"><Brush className="h-4 w-4" /></span>
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-medium">{candidate.senderName || candidate.senderEmail}</span>
-                      <span className="text-muted-foreground block truncate text-xs">{candidate.senderEmail} · {candidate.count} threads</span>
+                      <span className="text-muted-foreground block truncate text-xs">{candidate.senderEmail} · {candidate.count} in sample</span>
                     </span>
                     <Plus className="text-muted-foreground h-4 w-4" />
                   </button>

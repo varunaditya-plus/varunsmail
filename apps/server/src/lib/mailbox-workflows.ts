@@ -38,7 +38,7 @@ import {
 import { and, asc, desc, eq, inArray, isNull, lte, or } from 'drizzle-orm';
 import type { IGetThreadResponse } from './driver/types';
 import { applyGmailChange } from './gmail-mutations';
-import { connectionToDriver } from './server-utils';
+import { connectionToDriver, getThreadsFromDB } from './server-utils';
 import {
   cancelOutbox,
   listMailboxActivity,
@@ -54,6 +54,8 @@ import { createDb } from '../db';
 const FOCUS_LABEL = 'Varunsmail/Focus';
 const REMINDER_LABEL = 'Varunsmail/Reminded';
 const MAX_CRON_ATTEMPTS = 8;
+const CLEANUP_CANDIDATE_SAMPLE_SIZE = 100;
+const CLEANUP_RUN_BATCH_SIZE = 20;
 const focusLabelIds = new Map<string, string | null>();
 
 type Connection = typeof connection.$inferSelect;
@@ -82,6 +84,30 @@ const threadKey = (connectionId: string, threadId: string) => `${connectionId}/$
 
 const errorText = (error: unknown) =>
   error instanceof Error ? error.message.slice(0, 500) : String(error).slice(0, 500);
+
+function isCleanupThreadEligible(
+  thread: { messages: { isDraft?: boolean; receivedOn: string }[] },
+  cutoff: Date,
+) {
+  let latestReceivedAt: number | undefined;
+  for (const message of thread.messages) {
+    if (message.isDraft) continue;
+    const receivedAt = Date.parse(message.receivedOn);
+    if (!Number.isFinite(receivedAt)) return false;
+    latestReceivedAt = Math.max(latestReceivedAt ?? receivedAt, receivedAt);
+  }
+  return latestReceivedAt !== undefined && latestReceivedAt <= cutoff.getTime();
+}
+
+function takeCleanupRunBatch(threadIds: string[]) {
+  return threadIds.slice(0, CLEANUP_RUN_BATCH_SIZE);
+}
+
+function cleanupCandidateSampleLimit(mailboxIndex: number, mailboxCount: number) {
+  if (!mailboxCount) return 0;
+  const base = Math.floor(CLEANUP_CANDIDATE_SAMPLE_SIZE / mailboxCount);
+  return base + (mailboxIndex < CLEANUP_CANDIDATE_SAMPLE_SIZE % mailboxCount ? 1 : 0);
+}
 
 function requireLabelInput(action: RuleAction, labelId?: string) {
   if (action === 'label' && !labelId) throw new Error('Choose a Gmail label for this rule');
@@ -342,52 +368,54 @@ export class MailboxWorkflows {
       }
     >();
 
-    for (const mailbox of mailboxes) {
-      let cursor: string | undefined;
-      let scanned = 0;
-      // Keep this interactive endpoint bounded while still covering a large recent mailbox sample.
-      do {
-        const page = await this.env.THREADS_BUCKET.list({
-          prefix: `${mailbox.id}/`,
-          cursor,
-          limit: Math.min(1000, 2000 - scanned),
+    const objects = (
+      await Promise.all(
+        mailboxes.map(async (mailbox, mailboxIndex) => {
+          const maxResults = cleanupCandidateSampleLimit(mailboxIndex, mailboxes.length);
+          if (!maxResults) return [];
+          const page = await getThreadsFromDB(mailbox.id, {
+            folder: 'inbox',
+            maxResults,
+            pageToken: '',
+          });
+          return page.threads.map(({ id }) => ({ threadId: id, mailbox }));
+        }),
+      )
+    ).flat();
+    for (let offset = 0; offset < objects.length; offset += 10) {
+      const rows = await Promise.all(
+        objects
+          .slice(offset, offset + 10)
+          .map(async ({ threadId, mailbox }) => ({
+            mailbox,
+            thread: await readCachedThread(this.env, mailbox.id, threadId).catch(() => undefined),
+          })),
+      );
+      for (const { mailbox, thread } of rows) {
+        if (!thread) continue;
+        const message = findLatestIncomingMessage(thread.messages, mailbox.email);
+        if (!message) continue;
+        const senderEmail = normalizeSenderEmail(message.sender.email);
+        if (!senderEmail) continue;
+        const key = `${mailbox.id}:${senderEmail}`;
+        const current = candidates.get(key);
+        const receivedAt = message.receivedOn;
+        candidates.set(key, {
+          connectionId: mailbox.id,
+          accountEmail: mailbox.email,
+          senderEmail,
+          senderName: message.sender.name || current?.senderName,
+          count: (current?.count ?? 0) + 1,
+          oldestAt:
+            current && new Date(current.oldestAt) < new Date(receivedAt)
+              ? current.oldestAt
+              : receivedAt,
+          latestAt:
+            current && new Date(current.latestAt) > new Date(receivedAt)
+              ? current.latestAt
+              : receivedAt,
         });
-        cursor = page.truncated ? page.cursor : undefined;
-        scanned += page.objects.length;
-        for (let offset = 0; offset < page.objects.length; offset += 25) {
-          const rows = await Promise.all(
-            page.objects.slice(offset, offset + 25).map(async ({ key }) => {
-              const object = await this.env.THREADS_BUCKET.get(key);
-              return object ? object.json<IGetThreadResponse>().catch(() => undefined) : undefined;
-            }),
-          );
-          for (const thread of rows) {
-            if (!thread) continue;
-            const message = findLatestIncomingMessage(thread.messages, mailbox.email);
-            if (!message) continue;
-            const senderEmail = normalizeSenderEmail(message.sender.email);
-            if (!senderEmail) continue;
-            const key = `${mailbox.id}:${senderEmail}`;
-            const current = candidates.get(key);
-            const receivedAt = message.receivedOn;
-            candidates.set(key, {
-              connectionId: mailbox.id,
-              accountEmail: mailbox.email,
-              senderEmail,
-              senderName: message.sender.name || current?.senderName,
-              count: (current?.count ?? 0) + 1,
-              oldestAt:
-                current && new Date(current.oldestAt) < new Date(receivedAt)
-                  ? current.oldestAt
-                  : receivedAt,
-              latestAt:
-                current && new Date(current.latestAt) > new Date(receivedAt)
-                  ? current.latestAt
-                  : receivedAt,
-            });
-          }
-        }
-      } while (cursor && scanned < 2000);
+      }
     }
 
     return [...candidates.values()]
@@ -463,44 +491,37 @@ export class MailboxWorkflows {
     const driver = connectionToDriver(mailbox);
     const sender = rule.senderEmail.replace(/["\\]/g, '');
     const query = `from:"${sender}"${rule.ageDays ? ` older_than:${rule.ageDays}d` : ''}`;
-    const threadIds = new Set<string>();
-    let pageToken: string | undefined;
+    const cutoff = new Date(Date.now() - rule.ageDays * 86_400_000);
     try {
-      do {
-        const page = await driver.list({
-          folder: 'all',
-          query,
-          maxResults: 500,
-          pageToken,
-        });
-        page.threads.forEach(({ id }) => threadIds.add(id));
-        pageToken = page.nextPageToken ?? undefined;
-      } while (pageToken);
+      const page = await driver.list({ folder: 'inbox', query, maxResults: CLEANUP_RUN_BATCH_SIZE });
+      const ids = takeCleanupRunBatch(page.threads.map(({ id }) => id));
 
       const change =
         rule.action === 'trash'
           ? { addLabels: ['TRASH'], removeLabels: ['INBOX'] }
           : { addLabels: [], removeLabels: ['INBOX'] };
-      const ids = [...threadIds];
+      let changed = 0;
       for (let offset = 0; offset < ids.length; offset += 4) {
-        await Promise.all(
-          ids.slice(offset, offset + 4).map((threadId) =>
-            mutateAndReconcile(this.env, mailbox, threadId, change),
-          ),
+        const results = await Promise.allSettled(
+          ids.slice(offset, offset + 4).map(async (threadId) => {
+            const thread = await driver.get(threadId);
+            if (!isCleanupThreadEligible(thread, cutoff)) return false;
+            await mutateAndReconcile(this.env, mailbox, threadId, change);
+            return true;
+          }),
         );
+        changed += results.filter((result) => result.status === 'fulfilled' && result.value).length;
+        const failure = results.find((result) => result.status === 'rejected');
+        if (failure?.status === 'rejected') throw failure.reason;
       }
-      await this.db
-        .update(cleanupRule)
-        .set({ lastRunAt: new Date(), updatedAt: new Date() })
-        .where(eq(cleanupRule.id, rule.id));
       await recordMailboxAction(this.env, {
         userId: this.userId,
         connectionId: mailbox.id,
         action: rule.action === 'trash' ? 'cleanup trash' : 'cleanup archive',
         status: 'succeeded',
-        detail: `${ids.length} thread${ids.length === 1 ? '' : 's'} from ${rule.senderEmail}`,
+        detail: `${changed} thread${changed === 1 ? '' : 's'} from ${rule.senderEmail}`,
       });
-      return { changed: ids.length };
+      return { changed };
     } catch (error) {
       await recordMailboxAction(this.env, {
         userId: this.userId,
@@ -510,6 +531,11 @@ export class MailboxWorkflows {
         detail: errorText(error),
       });
       throw error;
+    } finally {
+      await this.db
+        .update(cleanupRule)
+        .set({ lastRunAt: new Date(), updatedAt: new Date() })
+        .where(eq(cleanupRule.id, rule.id));
     }
   }
 
@@ -1719,7 +1745,10 @@ export async function processMailboxWorkflowCron(env: ZeroEnv, now = new Date())
 
 export const mailboxWorkflowInternals = {
   classifyBundleKind,
+  cleanupCandidateSampleLimit,
+  isCleanupThreadEligible,
   processCleanupRules,
   processDueBundles,
   processDueReminders,
+  takeCleanupRunBatch,
 };
