@@ -992,7 +992,7 @@ export const MailList = memo(
                     if (!vListRef.current) return;
                     const endIndex = vListRef.current.findEndIndex();
                     if (
-                      // if the shown items are last 5 items, load more
+                      // Load more when the final rows enter the viewport.
                       Math.abs(filteredItems.length - 1 - endIndex) < 7 &&
                       !isLoading &&
                       !isFetchingNextPage &&
