@@ -1,4 +1,31 @@
 type OwnerSession = { user: { id: string; email: string } } | null;
+type McpSession = {
+  userId?: string | null;
+  accessTokenExpiresAt?: unknown;
+} | null;
+
+export function getMcpProtectedResourceMetadata(appOrigin: string) {
+  const origin = new URL(appOrigin).origin;
+  return {
+    resource: `${origin}/mcp`,
+    authorization_servers: [origin],
+    bearer_methods_supported: ['header'],
+    scopes_supported: ['openid', 'profile', 'email'],
+    resource_name: 'Varunsmail',
+  };
+}
+
+export function unauthorizedMcpResponse(appOrigin: string) {
+  const origin = new URL(appOrigin).origin;
+  const resourceMetadata = `${origin}/.well-known/oauth-protected-resource`;
+  return new Response('Unauthorized', {
+    status: 401,
+    headers: {
+      'WWW-Authenticate':
+        `Bearer resource_metadata="${resourceMetadata}", scope="openid profile email"`,
+    },
+  });
+}
 
 export async function authorizeAgentRequest(
   request: Request,
@@ -40,13 +67,21 @@ export async function getOwnerMcpUserId(
   headers: Headers,
   options: {
     ownerEmail: string;
-    getMcpSession: (headers: Headers) => Promise<{ userId?: string | null } | null>;
+    getMcpSession: (headers: Headers) => Promise<McpSession>;
     findUser: (userId: string) => Promise<{ email: string } | undefined>;
   },
 ) {
   if (!headers.get('Authorization')?.startsWith('Bearer ')) return;
   const session = await options.getMcpSession(headers);
-  if (!session?.userId) return;
+  const expiresAt = session?.accessTokenExpiresAt;
+  if (
+    !session?.userId ||
+    !(expiresAt instanceof Date) ||
+    !Number.isFinite(expiresAt.getTime()) ||
+    expiresAt.getTime() <= Date.now()
+  ) {
+    return;
+  }
   const user = await options.findUser(session.userId);
   if (user?.email.toLowerCase() === options.ownerEmail.toLowerCase()) return session.userId;
 }

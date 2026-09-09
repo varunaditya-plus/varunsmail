@@ -53,7 +53,12 @@ import { env, type ZeroEnv } from './env';
 import type { HonoContext } from './ctx';
 import { createDb, type DB } from './db';
 import { createAuth } from './lib/auth';
-import { authorizeAgentRequest, getOwnerMcpUserId } from './lib/private-access';
+import {
+  authorizeAgentRequest,
+  getMcpProtectedResourceMetadata,
+  getOwnerMcpUserId,
+  unauthorizedMcpResponse,
+} from './lib/private-access';
 import { aiRouter } from './routes/ai';
 import { appRouter } from './trpc';
 import { cors } from 'hono/cors';
@@ -760,11 +765,20 @@ const app = new Hono<HonoContext>()
         return null;
       },
       credentials: true,
-      allowHeaders: ['Content-Type', 'Authorization'],
-      exposeHeaders: ['X-Zero-Redirect'],
+      allowHeaders: [
+        'Content-Type',
+        'Authorization',
+        'Mcp-Session-Id',
+        'MCP-Protocol-Version',
+        'Last-Event-ID',
+      ],
+      exposeHeaders: ['X-Zero-Redirect', 'WWW-Authenticate', 'Mcp-Session-Id'],
     }),
   )
-  .get('.well-known/oauth-authorization-server', async (c) => {
+  .get('/.well-known/oauth-protected-resource', (c) =>
+    c.json(getMcpProtectedResourceMetadata(env.VITE_PUBLIC_BACKEND_URL)),
+  )
+  .get('/.well-known/oauth-authorization-server', async (c) => {
     const auth = createAuth();
     return oAuthDiscoveryMetadata(auth)(c.req.raw);
   })
@@ -772,7 +786,7 @@ const app = new Hono<HonoContext>()
     '/sse',
     async (request, env, ctx) => {
       const userId = await getMcpOwner(request.headers);
-      if (!userId) return new Response('Unauthorized', { status: 401 });
+      if (!userId) return unauthorizedMcpResponse(env.VITE_PUBLIC_BACKEND_URL);
       ctx.props = { userId };
       return ZeroMCP.serveSSE('/sse', { binding: 'ZERO_MCP' }).fetch(request, env, ctx);
     },
@@ -782,7 +796,7 @@ const app = new Hono<HonoContext>()
     '/mcp/thinking/sse',
     async (request, env, ctx) => {
       const userId = await getMcpOwner(request.headers);
-      if (!userId) return new Response('Unauthorized', { status: 401 });
+      if (!userId) return unauthorizedMcpResponse(env.VITE_PUBLIC_BACKEND_URL);
       ctx.props = { userId };
       return ThinkingMCP.serveSSE('/mcp/thinking/sse', { binding: 'THINKING_MCP' }).fetch(
         request,
@@ -796,7 +810,7 @@ const app = new Hono<HonoContext>()
     '/mcp',
     async (request, env, ctx) => {
       const userId = await getMcpOwner(request.headers);
-      if (!userId) return new Response('Unauthorized', { status: 401 });
+      if (!userId) return unauthorizedMcpResponse(env.VITE_PUBLIC_BACKEND_URL);
       ctx.props = { userId };
       return ZeroMCP.serve('/mcp', { binding: 'ZERO_MCP' }).fetch(request, env, ctx);
     },
