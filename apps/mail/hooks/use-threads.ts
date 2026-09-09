@@ -4,7 +4,7 @@ import type { IGetThreadResponse } from '../../server/src/lib/driver/types';
 import { useSearchValue } from '@/hooks/use-search-value';
 import { isSharedGmailLabel, threadKey } from '@/lib/thread-ref';
 import { useAliasMailbox } from '@/hooks/use-alias-mailbox';
-import { useConnections } from '@/hooks/use-connections';
+import { useActiveConnection, useConnections } from '@/hooks/use-connections';
 import { useTRPC } from '@/providers/query-provider';
 import useSearchLabels from './use-labels-search';
 import { useSession } from '@/lib/auth-client';
@@ -31,6 +31,7 @@ export const useThreads = () => {
   const [smartFolderId] = useQueryState('smart');
   const [sortParam] = useQueryState('sort');
   const { data: connectionsData } = useConnections();
+  const { data: activeConnection } = useActiveConnection();
   const smartFolderQuery = useQuery(
     trpc.mailboxWorkflows.smartFolders.get.queryOptions(
       { id: smartFolderId ?? '' },
@@ -60,6 +61,9 @@ export const useThreads = () => {
     isAliasMailboxActive && aliasMailbox
       ? [...new Set([...labels, aliasMailbox.labelId])]
       : labels;
+  const connectionId =
+    smartFolder?.connectionId ??
+    (isAliasMailboxActive ? aliasMailbox?.sourceConnectionId : activeConnection?.id);
 
   const unifiedQuery = useInfiniteQuery(
     trpc.mail.listUnifiedThreads.infiniteQueryOptions(
@@ -86,7 +90,7 @@ export const useThreads = () => {
         q: effectiveSearch,
         folder,
         labelIds: connectionLabels,
-        connectionId: smartFolder?.connectionId ?? (isAliasMailboxActive ? aliasMailbox?.sourceConnectionId : undefined),
+        connectionId,
       },
       {
         enabled:
@@ -94,7 +98,8 @@ export const useThreads = () => {
           !isWorkflowView &&
           isSmartFolderReady &&
           !isAliasMailboxResolving &&
-          (!isAliasMailboxActive || !!aliasMailbox),
+          (!isAliasMailboxActive || !!aliasMailbox) &&
+          !!connectionId,
         initialCursor: '',
         getNextPageParam: (lastPage) => lastPage?.nextPageToken ?? null,
         staleTime: 60 * 1000 * 1, // 1 minute
