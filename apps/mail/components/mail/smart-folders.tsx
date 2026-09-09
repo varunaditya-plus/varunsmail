@@ -29,6 +29,13 @@ import { Input } from '@/components/ui/input';
 
 type SmartFolderSort = 'newest' | 'oldest' | 'sender' | 'domain';
 
+const SORT_LABELS = {
+  newest: 'Newest first',
+  oldest: 'Oldest in loaded mail',
+  sender: 'Sender in loaded mail',
+  domain: 'Sender domain in loaded mail',
+};
+
 export function SmartFolders() {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -159,7 +166,7 @@ export function SmartFolders() {
                       className="h-2 w-2 rounded-full"
                       style={{ backgroundColor: getAccountColor(folder.connectionId ?? 'unified') }}
                     />
-                    {account?.email ?? 'All Gmail accounts'} · Sort by {folder.sort}
+                    {account?.email ?? 'All Gmail accounts'} · {SORT_LABELS[folder.sort]}
                   </p>
                 </div>
                 <div className="flex items-center gap-1">
@@ -242,13 +249,16 @@ export function SmartFolders() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="newest">Newest first</SelectItem>
-                    <SelectItem value="oldest">Oldest first</SelectItem>
-                    <SelectItem value="sender">Sender</SelectItem>
-                    <SelectItem value="domain">Sender domain</SelectItem>
+                    <SelectItem value="oldest">Oldest in loaded mail</SelectItem>
+                    <SelectItem value="sender">Sender in loaded mail</SelectItem>
+                    <SelectItem value="domain">Sender domain in loaded mail</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
             </div>
+            <p className="text-muted-foreground text-xs">
+              Oldest, sender, and domain sorting apply to the messages loaded as you scroll.
+            </p>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)}>

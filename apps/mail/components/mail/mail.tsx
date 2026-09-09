@@ -499,9 +499,9 @@ export function MailLayout() {
                         <DropdownMenuContent align="end">
                           {[
                             ['newest', 'Newest first'],
-                            ['oldest', 'Oldest first'],
-                            ['sender', 'Sender'],
-                            ['domain', 'Sender domain'],
+                            ['oldest', 'Oldest in loaded mail'],
+                            ['sender', 'Sender in loaded mail'],
+                            ['domain', 'Sender domain in loaded mail'],
                           ].map(([value, label]) => (
                             <DropdownMenuItem key={value} onSelect={() => void setSort(value)}>
                               <Check className={cn('mr-2 h-4 w-4', activeSort === value ? 'opacity-100' : 'opacity-0')} />

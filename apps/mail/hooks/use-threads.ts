@@ -120,6 +120,7 @@ export const useThreads = () => {
         seen.add(key);
         return true;
       });
+    // Gmail pages arrive newest first. Other sort modes reorder only the pages loaded so far.
     const sort = ['newest', 'oldest', 'sender', 'domain'].includes(sortParam ?? '')
       ? sortParam
       : (smartFolder?.sort ?? 'newest');
