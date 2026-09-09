@@ -138,8 +138,9 @@ export function NavUser() {
 
     isEnsuringAliasSourceRef.current = true;
     void setDefaultConnection({ connectionId: aliasMailbox.sourceConnectionId })
-      .then(() => {
+      .then(async () => {
         queryClient.clear();
+        await idbClear();
         window.location.reload();
       })
       .catch((error) => {
