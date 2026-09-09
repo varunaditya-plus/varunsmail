@@ -55,7 +55,11 @@ export const SidebarProvider = React.forwardRef<
 
     // This is the internal state of the sidebar.
     // We use openProp and setOpenProp for control from outside the component.
-    const [_open, _setOpen] = React.useState(defaultOpen);
+    const [_open, _setOpen] = React.useState(() => {
+      if (typeof document === 'undefined') return defaultOpen;
+      const sidebarCookie = getCookie(SIDEBAR_COOKIE_NAME);
+      return sidebarCookie ? sidebarCookie === 'true' : defaultOpen;
+    });
     const open = openProp ?? _open;
     const setOpen = React.useCallback(
       (value: boolean | ((value: boolean) => boolean)) => {
@@ -76,13 +80,6 @@ export const SidebarProvider = React.forwardRef<
     const toggleSidebar = React.useCallback(() => {
       return isMobile ? setOpenMobile((open) => !open) : setOpen((open) => !open);
     }, [isMobile, setOpen, setOpenMobile]);
-
-    React.useEffect(() => {
-      // In nextjs, browser apis are guarded so we need to do this in a use effect to not get an error that document is not defined.
-      const sidebarCookie = getCookie(SIDEBAR_COOKIE_NAME);
-      const isDefaultOpen = sidebarCookie ? sidebarCookie === 'true' : defaultOpen;
-      _setOpen(isDefaultOpen);
-    }, [defaultOpen]);
 
     // We add a state so that we can do data-state="expanded" or "collapsed".
     // This makes it easier to style the sidebar with Tailwind classes.

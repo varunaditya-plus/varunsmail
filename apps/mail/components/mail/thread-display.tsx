@@ -30,8 +30,6 @@ import { useAISidebar } from '@/components/ui/ai-sidebar';
 import { EmptyStateIcon } from '../icons/empty-state-svg';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import type { ParsedMessage, Attachment } from '@/types';
-import { useAnimations } from '@/hooks/use-animations';
-import { AnimatePresence, motion } from 'motion/react';
 import { MailDisplaySkeleton } from './mail-skeleton';
 import { useTRPC } from '@/providers/query-provider';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
@@ -176,10 +174,6 @@ export function ThreadDisplay() {
   const [isStarred, setIsStarred] = useState(false);
   const [isImportant, setIsImportant] = useState(false);
 
-  const [navigationDirection, setNavigationDirection] = useState<'previous' | 'next' | null>(null);
-
-  const animationsEnabled = useAnimations();
-
   // Collect all attachments from all messages in the thread
   const allThreadAttachments = useMemo(() => {
     if (!emailData?.messages) return [];
@@ -254,9 +248,6 @@ export function ThreadDisplay() {
         setThreadId(nextThread.id);
         setConnectionId(nextThread.connectionId ?? null);
         setFocusedIndex(focusedIndex + 1);
-        if (animationsEnabled) {
-          setNavigationDirection('next');
-        }
       }
     }
   }, [
@@ -269,7 +260,6 @@ export function ThreadDisplay() {
     setMode,
     setActiveReplyId,
     setDraftId,
-    animationsEnabled,
   ]);
 
   const handleUnsubscribeProcess = () => {
@@ -763,22 +753,16 @@ export function ThreadDisplay() {
     }
   }, [mode, activeReplyId]);
 
-  const handleAnimationComplete = useCallback(() => {
-    setNavigationDirection(null);
-  }, [setNavigationDirection]);
-
   return (
     <div
       className={cn(
-        'flex flex-col',
-        isFullscreen ? 'h-screen' : isMobile ? 'h-full' : 'h-[calc(100dvh-19px)] rounded-xl',
+        'flex h-full min-h-0 flex-col',
+        isFullscreen && 'h-screen',
       )}
     >
       <div
         className={cn(
-          'bg-panelLight dark:bg-panelDark relative flex flex-col overflow-hidden rounded-xl duration-300',
-          isMobile ? 'h-full' : 'h-full',
-          !isMobile && !isFullscreen && 'rounded-r-lg',
+          'bg-panelLight dark:bg-panelDark relative flex h-full min-h-0 flex-col overflow-hidden duration-300',
           isFullscreen ? 'fixed inset-0 z-50' : '',
         )}
       >
@@ -1010,61 +994,15 @@ export function ThreadDisplay() {
               </div>
             </div>
             <div className={cn('flex min-h-0 flex-1 flex-col', isMobile && 'h-full')}>
-              {animationsEnabled ? (
-                <AnimatePresence mode="wait" initial={false}>
-                  <motion.div
-                    key={id}
-                    initial={{
-                      opacity: 0,
-                      x:
-                        navigationDirection === 'previous'
-                          ? -25
-                          : navigationDirection === 'next'
-                            ? 25
-                            : 0,
-                    }}
-                    animate={{
-                      opacity: 1,
-                      x: 0,
-                    }}
-                    exit={{
-                      opacity: 0,
-                      x:
-                        navigationDirection === 'previous'
-                          ? 25
-                          : navigationDirection === 'next'
-                            ? -25
-                            : 0,
-                    }}
-                    transition={{
-                      duration: 0.08,
-                      ease: [0.4, 0, 0.2, 1],
-                    }}
-                    onAnimationComplete={handleAnimationComplete}
-                    className="h-full w-full"
-                  >
-                    <MessageList
-                      messages={emailData.messages}
-                      isFullscreen={isFullscreen}
-                      totalReplies={emailData?.totalReplies}
-                      allThreadAttachments={allThreadAttachments}
-                      mode={mode || undefined}
-                      activeReplyId={activeReplyId || undefined}
-                      isMobile={isMobile}
-                    />
-                  </motion.div>
-                </AnimatePresence>
-              ) : (
-                <MessageList
-                  messages={emailData.messages}
-                  isFullscreen={isFullscreen}
-                  totalReplies={emailData?.totalReplies}
-                  allThreadAttachments={allThreadAttachments}
-                  mode={mode || undefined}
-                  activeReplyId={activeReplyId || undefined}
-                  isMobile={isMobile}
-                />
-              )}
+              <MessageList
+                messages={emailData.messages}
+                isFullscreen={isFullscreen}
+                totalReplies={emailData?.totalReplies}
+                allThreadAttachments={allThreadAttachments}
+                mode={mode || undefined}
+                activeReplyId={activeReplyId || undefined}
+                isMobile={isMobile}
+              />
 
               {mode &&
                 activeReplyId &&

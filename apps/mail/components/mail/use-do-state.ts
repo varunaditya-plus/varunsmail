@@ -1,3 +1,5 @@
+import { useActiveConnection } from '@/hooks/use-connections';
+import { useCallback } from 'react';
 import { atom, useAtom } from 'jotai';
 
 export type State = {
@@ -8,31 +10,29 @@ export type State = {
   shards: number;
 };
 
-const stateAtom = atom<State>({
+const emptyState: State = {
   isSyncing: false,
   syncingFolders: [],
   storageSize: 0,
   counts: [],
   shards: 0,
-});
+};
+
+const stateAtom = atom<Record<string, State>>({});
 
 function useDoState() {
-  return useAtom(stateAtom);
+  const { data: activeConnection } = useActiveConnection();
+  const [states, setStates] = useAtom(stateAtom);
+  const connectionId = activeConnection?.id;
+  const setState = useCallback(
+    (state: State) => {
+      if (!connectionId) return;
+      setStates((states) => ({ ...states, [connectionId]: state }));
+    },
+    [connectionId, setStates],
+  );
+
+  return [connectionId ? states[connectionId] ?? emptyState : emptyState, setState] as const;
 }
 
-const setIsSyncingAtom = atom(null, (get, set, isSyncing: boolean) => {
-  const current = get(stateAtom);
-  set(stateAtom, { ...current, isSyncing });
-});
-
-const setSyncingFoldersAtom = atom(null, (get, set, syncingFolders: string[]) => {
-  const current = get(stateAtom);
-  set(stateAtom, { ...current, syncingFolders });
-});
-
-const setStorageSizeAtom = atom(null, (get, set, storageSize: number) => {
-  const current = get(stateAtom);
-  set(stateAtom, { ...current, storageSize });
-});
-
-export { setIsSyncingAtom, setSyncingFoldersAtom, setStorageSizeAtom, useDoState };
+export { useDoState };

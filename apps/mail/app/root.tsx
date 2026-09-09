@@ -27,6 +27,21 @@ import superjson from 'superjson';
 import './globals.css';
 
 const getUrl = () => import.meta.env.VITE_PUBLIC_BACKEND_URL + '/api/trpc';
+const FALLBACK_NAV_ITEMS = ['inbox', 'drafts', 'sent', 'screening', 'bundles', 'focus', 'rules', 'settings'];
+const FALLBACK_ROWS = [
+  'alpha',
+  'bravo',
+  'charlie',
+  'delta',
+  'echo',
+  'foxtrot',
+  'golf',
+  'hotel',
+  'india',
+  'juliet',
+  'kilo',
+  'lima',
+];
 
 export const getServerTrpc = (req: Request) =>
   createTRPCClient<AppRouter>({
@@ -85,11 +100,34 @@ export function Layout({ children }: PropsWithChildren) {
 
 export function HydrateFallback() {
   return (
-    <div className="bg-background text-muted-foreground flex min-h-svh w-full items-center justify-center">
-      <div
-        className="h-5 w-5 animate-spin rounded-full border-2 border-current border-t-transparent"
-        aria-label="Loading mail"
-      />
+    <div className="bg-sidebar flex h-svh w-full flex-col overflow-hidden" aria-label="Loading mail">
+      <div className="flex h-16 shrink-0 items-center gap-4 px-3">
+        <div className="bg-muted h-8 w-44 animate-pulse rounded-lg" />
+        <div className="bg-muted/70 h-12 max-w-2xl flex-1 animate-pulse rounded-3xl" />
+        <div className="bg-muted h-8 w-8 animate-pulse rounded-full" />
+      </div>
+      <div className="flex min-h-0 flex-1">
+        <div className="hidden w-64 shrink-0 space-y-3 px-4 py-3 md:block">
+          <div className="bg-muted h-14 animate-pulse rounded-2xl" />
+          {FALLBACK_NAV_ITEMS.map((item) => (
+            <div key={item} className="bg-muted/60 h-8 animate-pulse rounded-lg" />
+          ))}
+        </div>
+        <div className="bg-panelLight dark:bg-panelDark min-w-0 flex-1 overflow-hidden rounded-t-xl">
+          <div className="border-border/70 flex h-12 items-center gap-3 border-b px-4">
+            <div className="bg-muted h-4 w-4 animate-pulse rounded" />
+            <div className="bg-muted h-4 w-4 animate-pulse rounded-full" />
+          </div>
+          {FALLBACK_ROWS.map((row) => (
+            <div key={row} className="border-border/70 flex h-11 items-center gap-4 border-b px-4">
+              <div className="bg-muted h-4 w-4 animate-pulse rounded" />
+              <div className="bg-muted h-3 w-28 animate-pulse rounded" />
+              <div className="bg-muted/70 h-3 flex-1 animate-pulse rounded" />
+              <div className="bg-muted h-3 w-12 animate-pulse rounded" />
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

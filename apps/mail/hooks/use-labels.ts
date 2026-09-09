@@ -1,4 +1,5 @@
 import { useTRPC } from '@/providers/query-provider';
+import { useActiveConnection } from '@/hooks/use-connections';
 import { useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
 
@@ -14,9 +15,11 @@ const desiredSystemLabels = new Set([
 
 export function useLabels(connectionId?: string, enabled = true) {
   const trpc = useTRPC();
+  const { data: activeConnection } = useActiveConnection();
+  const resolvedConnectionId = connectionId ?? activeConnection?.id;
   const labelQuery = useQuery(
-    trpc.labels.list.queryOptions(connectionId ? { connectionId } : undefined, {
-      enabled,
+    trpc.labels.list.queryOptions(resolvedConnectionId ? { connectionId: resolvedConnectionId } : undefined, {
+      enabled: enabled && !!resolvedConnectionId,
       staleTime: 1000 * 60 * 60, // 1 hour
     }),
   );
