@@ -1,9 +1,10 @@
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Suspense, useEffect, useState, type ReactNode } from 'react';
+import { Suspense, useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import type { EnvVarInfo } from '@zero/server/auth-providers';
 import { Google, Microsoft } from '@/components/icons/icons';
 import ErrorMessage from '@/app/(auth)/login/error-message';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Mail, TriangleAlert } from 'lucide-react';
 import { signIn } from '@/lib/auth-client';
 import { useNavigate } from 'react-router';
@@ -53,7 +54,10 @@ const getProviderIcon = (providerId: string, className?: string): ReactNode => {
 function LoginClientContent({ providers, isProd }: LoginClientProps) {
   const navigate = useNavigate();
   const [expandedProviders, setExpandedProviders] = useState<Record<string, boolean>>({});
-  const [error, _] = useQueryState('error');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [isSigningIn, setIsSigningIn] = useState(false);
+  const [error] = useQueryState('error');
 
   useEffect(() => {
     const missing = providers.find((p) => p.required && !p.enabled);
@@ -96,7 +100,7 @@ function LoginClientContent({ providers, isProd }: LoginClientProps) {
     } else {
       toast.promise(
         signIn.social({
-          provider: provider.id as any,
+          provider: provider.id as 'google' | 'microsoft',
           callbackURL: `${window.location.origin}/mail`,
         }),
         {
@@ -105,6 +109,30 @@ function LoginClientContent({ providers, isProd }: LoginClientProps) {
       );
     }
   };
+
+  async function handlePasswordSignIn(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setIsSigningIn(true);
+
+    try {
+      const result = await signIn.email({
+        email,
+        password,
+        callbackURL: `${window.location.origin}/mail`,
+      });
+
+      if (result.error) {
+        toast.error('Invalid email or password');
+        return;
+      }
+
+      navigate('/mail');
+    } catch {
+      toast.error('Login failed. Please try again.');
+    } finally {
+      setIsSigningIn(false);
+    }
+  }
 
   const sortedProviders = [...displayProviders].sort((a, b) => {
     if (a.id === 'zero') return -1;
@@ -247,6 +275,40 @@ function LoginClientContent({ providers, isProd }: LoginClientProps) {
 
           {!hasMissingRequiredProviders && (
             <div className="relative z-10 mx-auto flex w-full flex-col items-center justify-center gap-2">
+              <form className="w-full space-y-3" onSubmit={handlePasswordSignIn}>
+                <Input
+                  type="email"
+                  name="email"
+                  autoComplete="email"
+                  placeholder="Email"
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                  className="h-12 rounded-lg bg-white text-black"
+                  required
+                />
+                <Input
+                  type="password"
+                  name="password"
+                  autoComplete="current-password"
+                  placeholder="Password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  className="h-12 rounded-lg bg-white text-black"
+                  required
+                />
+                <Button type="submit" className="h-12 w-full rounded-lg" disabled={isSigningIn}>
+                  {isSigningIn ? 'Signing in...' : 'Sign in'}
+                </Button>
+              </form>
+
+              {sortedProviders.some((provider) => provider.enabled || provider.isCustom) && (
+                <div className="flex w-full items-center gap-3 py-1 text-xs text-gray-400">
+                  <span className="h-px flex-1 bg-white/15" />
+                  or
+                  <span className="h-px flex-1 bg-white/15" />
+                </div>
+              )}
+
               {sortedProviders.map(
                 (provider) =>
                   (provider.enabled || provider.isCustom) && (

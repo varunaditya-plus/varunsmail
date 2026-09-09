@@ -17,7 +17,7 @@ export const ownerAuthOptions = (ownerEmail: string) => {
     },
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
-        if (ctx.path.startsWith('/sign-up') || ctx.path === '/sign-in/social') {
+        if (ctx.path.startsWith('/sign-up')) {
           throw new APIError('FORBIDDEN', { message: 'Account registration is disabled' });
         }
         if (
