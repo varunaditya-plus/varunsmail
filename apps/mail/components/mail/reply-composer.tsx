@@ -39,7 +39,7 @@ export default function ReplyCompose({ messageId }: ReplyComposeProps) {
   const replyConnectionId = isAliasMailboxActive
     ? (aliasMailbox?.sourceConnectionId ?? null)
     : (connectionId ?? activeConnection?.id ?? null);
-  const { data: aliases, isFetching: isAliasesFetching } = useEmailAliases(replyConnectionId);
+  const { data: aliases, isFetched: areAliasesResolved } = useEmailAliases(replyConnectionId);
 
   const [draftId, setDraftId] = useQueryState('draftId');
   const [threadId] = useQueryState('threadId');
@@ -305,7 +305,7 @@ export default function ReplyCompose({ messageId }: ReplyComposeProps) {
     !mode ||
     !emailData ||
     !replyConnection ||
-    isAliasesFetching ||
+    (!!replyConnectionId && !areAliasesResolved) ||
     isDraftFetching ||
     (isAliasMailboxActive && !aliasMailbox)
   ) {
