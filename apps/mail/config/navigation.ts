@@ -37,7 +37,6 @@ export interface NavItem {
   icon: React.ComponentType<React.SVGProps<SVGSVGElement>>;
   badge?: number;
   isBackButton?: boolean;
-  isSettingsButton?: boolean;
   disabled?: boolean;
   target?: string;
   shortcut?: string;
@@ -299,18 +298,3 @@ export const navigationConfig: Record<string, NavConfig> = {
     ],
   },
 };
-
-export const bottomNavItems = [
-  {
-    title: '',
-    items: [
-      {
-        id: 'settings',
-        title: m['navigation.sidebar.settings'](),
-        url: '/settings/general',
-        icon: SettingsGear,
-        isSettingsButton: true,
-      },
-    ],
-  },
-];

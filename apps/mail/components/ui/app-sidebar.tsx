@@ -5,8 +5,8 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
-import { Sidebar, SidebarContent, SidebarFooter, SidebarHeader } from '@/components/ui/sidebar';
-import { navigationConfig, bottomNavItems } from '@/config/navigation';
+import { Sidebar, SidebarContent, SidebarHeader } from '@/components/ui/sidebar';
+import { navigationConfig } from '@/config/navigation';
 import { useTRPC } from '@/providers/query-provider';
 import { useSidebar } from '@/components/ui/sidebar';
 import { CreateEmail } from '../create/create-email';
@@ -174,10 +174,6 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               />
             </div>
           </SidebarContent>
-
-          <SidebarFooter className={`px-0 pb-0 ${state === 'collapsed' ? 'md:px-2' : 'md:px-4'}`}>
-            <NavMain items={bottomNavItems} isBottomNav />
-          </SidebarFooter>
         </Sidebar>
       )}
     </div>

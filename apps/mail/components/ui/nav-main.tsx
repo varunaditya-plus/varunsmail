@@ -48,7 +48,6 @@ interface NavMainProps {
     isActive?: boolean;
     configurable?: boolean;
   }[];
-  isBottomNav?: boolean;
   hiddenItemIds?: string[];
   onItemVisibilityChange?: (itemId: string, visible: boolean) => Promise<void>;
   isVisibilitySaving?: boolean;
@@ -61,7 +60,6 @@ type IconRefType = SVGSVGElement & {
 
 export function NavMain({
   items,
-  isBottomNav = false,
   hiddenItemIds = [],
   onItemVisibilityChange,
   isVisibilitySaving = false,
@@ -104,13 +102,6 @@ export function NavMain({
       // Get the current 'from' parameter
       const currentFrom = searchParams.get('from');
 
-      // Handle settings navigation
-      if (item.isSettingsButton) {
-        // Include current path with category query parameter if present
-        const currentPath = pathname;
-        return `${item.url}?from=${encodeURIComponent(currentPath)}`;
-      }
-
       // Handle back button with redirect protection
       if (item.isBackButton) {
         if (currentFrom) {
@@ -136,7 +127,7 @@ export function NavMain({
 
       return item.url;
     },
-    [pathname, searchParams, isValidInternalUrl],
+    [searchParams, isValidInternalUrl],
   );
 
   const { data: activeAccount } = useActiveConnection();
@@ -255,7 +246,7 @@ export function NavMain({
             </SidebarMenuItem>
           </Collapsible>
         ))}
-        {!pathname.includes('/settings') && !isBottomNav && state !== 'collapsed' && (
+        {!pathname.includes('/settings') && state !== 'collapsed' && (
           <Collapsible defaultOpen={true} className="group/collapsible flex-col">
             <SidebarMenuItem className="mb-4" style={{ height: 'auto' }}>
               <div className="mx-2 mb-4 flex items-center justify-between">
