@@ -48,6 +48,7 @@ const DEFAULTS: NotificationPreferences = {
 const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const DOMAIN_PATTERN = /^@?(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/i;
+const PERMISSION_CHANGE_EVENT = 'varunsmail-notification-permission-change';
 
 function isValidTimezone(timezone: string) {
   try {
@@ -73,8 +74,15 @@ export default function NotificationsPage() {
   const quietHoursEnabled = form.watch('quietHoursEnabled');
 
   useEffect(() => {
-    if (typeof Notification !== 'undefined') setPermission(Notification.permission);
-    else setPermission('unsupported');
+    function updatePermission() {
+      setPermission(
+        typeof Notification === 'undefined' ? 'unsupported' : Notification.permission,
+      );
+    }
+
+    updatePermission();
+    window.addEventListener('focus', updatePermission);
+    return () => window.removeEventListener('focus', updatePermission);
   }, []);
 
   useEffect(() => {
@@ -115,6 +123,7 @@ export default function NotificationsPage() {
     }
     const nextPermission = await Notification.requestPermission();
     setPermission(nextPermission);
+    window.dispatchEvent(new Event(PERMISSION_CHANGE_EVENT));
     if (nextPermission === 'granted') toast.success('Browser notifications are enabled.');
     else toast.error('Browser notification permission was not granted.');
   }

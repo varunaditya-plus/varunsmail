@@ -23,6 +23,7 @@ type NotificationSettings = {
 };
 
 const SEEN_THREADS_KEY = 'varunsmail-notified-threads';
+const PERMISSION_CHANGE_EVENT = 'varunsmail-notification-permission-change';
 const POLL_INTERVAL = 60 * 1000;
 const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
 
@@ -101,6 +102,7 @@ function shouldNotify(thread: NotificationThread, settings: NotificationSettings
 
 export function MailNotifications() {
   const [storageReady, setStorageReady] = useState(false);
+  const [permission, setPermission] = useState<NotificationPermission | 'unsupported'>('default');
   const seenThreadsRef = useRef(new Set<string>());
   const seededRef = useRef(false);
   const { data } = useSettings();
@@ -110,7 +112,10 @@ export function MailNotifications() {
     trpc.mail.listUnifiedThreads.queryOptions(
       { q: '', labelIds: [], connectionIds: [], maxResults: 50, cursor: '' },
       {
-        enabled: !!settings && settings.newMailNotifications !== 'none',
+        enabled:
+          permission === 'granted' &&
+          !!settings &&
+          settings.newMailNotifications !== 'none',
         staleTime: 0,
         refetchInterval: POLL_INTERVAL,
         refetchIntervalInBackground: true,
@@ -121,6 +126,22 @@ export function MailNotifications() {
   useEffect(() => {
     seenThreadsRef.current = readSeenThreads();
     setStorageReady(true);
+  }, []);
+
+  useEffect(() => {
+    function updatePermission() {
+      setPermission(
+        typeof Notification === 'undefined' ? 'unsupported' : Notification.permission,
+      );
+    }
+
+    updatePermission();
+    window.addEventListener('focus', updatePermission);
+    window.addEventListener(PERMISSION_CHANGE_EVENT, updatePermission);
+    return () => {
+      window.removeEventListener('focus', updatePermission);
+      window.removeEventListener(PERMISSION_CHANGE_EVENT, updatePermission);
+    };
   }, []);
 
   useEffect(() => {
