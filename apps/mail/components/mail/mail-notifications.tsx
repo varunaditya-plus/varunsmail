@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useTRPC } from '@/providers/query-provider';
 import { useSettings } from '@/hooks/use-settings';
 import { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router';
 
 type NotificationThread = {
   id: string;
@@ -103,6 +104,7 @@ function shouldNotify(thread: NotificationThread, settings: NotificationSettings
 }
 
 export function MailNotifications() {
+  const navigate = useNavigate();
   const [storageReady, setStorageReady] = useState(false);
   const [permission, setPermission] = useState<NotificationPermission | 'unsupported'>('default');
   const seenThreadsRef = useRef(new Set<string>());
@@ -186,14 +188,14 @@ export function MailNotifications() {
             threadId: thread.id,
             connectionId,
           });
-          window.location.assign(`/mail/unified?${params}`);
+          navigate(`/mail/unified?${params}`);
         };
       } catch (error) {
         console.error('Failed to show new mail notification', error);
       }
     }
     if (changed) saveSeenThreads(seenThreadsRef.current);
-  }, [settings, storageReady, threadsQuery.data, threadsQuery.dataUpdatedAt]);
+  }, [navigate, settings, storageReady, threadsQuery.data, threadsQuery.dataUpdatedAt]);
 
   return null;
 }
