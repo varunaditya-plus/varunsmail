@@ -43,6 +43,49 @@ const activityRouter = router({
     ),
 });
 
+const cleanupRouter = router({
+  candidates: privateProcedure
+    .input(z.object({ connectionId: z.string().min(1).optional() }).optional())
+    .query(async ({ ctx, input }) => ({
+      senders: await service(ctx.sessionUser.id).listCleanupCandidates(input?.connectionId),
+    })),
+  list: privateProcedure
+    .input(z.object({ connectionId: z.string().min(1).optional() }).optional())
+    .query(async ({ ctx, input }) => ({
+      rules: await service(ctx.sessionUser.id).listCleanupRules(input?.connectionId),
+    })),
+  create: privateProcedure
+    .input(
+      z.object({
+        connectionId: z.string().min(1),
+        senderEmail: z.string().email(),
+        action: z.enum(['archive', 'trash']),
+        ageDays: z.number().int().min(0).max(3650),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => ({
+      rule: await service(ctx.sessionUser.id).createCleanupRule(
+        input.connectionId,
+        input.senderEmail,
+        input.action,
+        input.ageDays,
+      ),
+    })),
+  setEnabled: privateProcedure
+    .input(z.object({ id: z.string().min(1), enabled: z.boolean() }))
+    .mutation(async ({ ctx, input }) => ({
+      rule: await service(ctx.sessionUser.id).setCleanupRuleEnabled(input.id, input.enabled),
+    })),
+  run: privateProcedure
+    .input(z.object({ id: z.string().min(1) }))
+    .mutation(async ({ ctx, input }) => service(ctx.sessionUser.id).runCleanupRule(input.id)),
+  delete: privateProcedure
+    .input(z.object({ id: z.string().min(1) }))
+    .mutation(async ({ ctx, input }) => ({
+      deleted: await service(ctx.sessionUser.id).deleteCleanupRule(input.id),
+    })),
+});
+
 const remindersRouter = router({
   list: privateProcedure
     .input(z.object({ connectionId: z.string().min(1).optional() }).optional())
@@ -203,6 +246,7 @@ const focusRouter = router({
 
 export const mailboxWorkflowsRouter = router({
   activity: activityRouter,
+  cleanup: cleanupRouter,
   reminders: remindersRouter,
   screening: screeningRouter,
   rules: rulesRouter,

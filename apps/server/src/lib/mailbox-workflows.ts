@@ -22,6 +22,7 @@ import {
 import {
   bundleMatcher,
   bundleThread,
+  cleanupRule,
   connection,
   focusThread,
   mailBundle,
@@ -238,6 +239,198 @@ export class MailboxWorkflows {
 
   async cancelOutbox(messageId: string) {
     return cancelOutbox(this.env, this.userId, messageId);
+  }
+
+  async listCleanupCandidates(connectionId?: string) {
+    if (connectionId) await this.connection(connectionId);
+    const mailboxes = await this.db.query.connection.findMany({
+      where: connectionId
+        ? and(eq(connection.userId, this.userId), eq(connection.id, connectionId))
+        : and(eq(connection.userId, this.userId), eq(connection.providerId, 'google')),
+      columns: { id: true, email: true },
+    });
+    const candidates = new Map<
+      string,
+      {
+        connectionId: string;
+        accountEmail: string;
+        senderEmail: string;
+        senderName?: string;
+        count: number;
+        oldestAt: string;
+        latestAt: string;
+      }
+    >();
+
+    for (const mailbox of mailboxes) {
+      let cursor: string | undefined;
+      let scanned = 0;
+      // Keep this interactive endpoint bounded while still covering a large recent mailbox sample.
+      do {
+        const page = await this.env.THREADS_BUCKET.list({
+          prefix: `${mailbox.id}/`,
+          cursor,
+          limit: Math.min(1000, 2000 - scanned),
+        });
+        cursor = page.truncated ? page.cursor : undefined;
+        scanned += page.objects.length;
+        for (let offset = 0; offset < page.objects.length; offset += 25) {
+          const rows = await Promise.all(
+            page.objects.slice(offset, offset + 25).map(async ({ key }) => {
+              const object = await this.env.THREADS_BUCKET.get(key);
+              return object ? object.json<IGetThreadResponse>().catch(() => undefined) : undefined;
+            }),
+          );
+          for (const thread of rows) {
+            if (!thread) continue;
+            const message = findLatestIncomingMessage(thread.messages, mailbox.email);
+            if (!message) continue;
+            const senderEmail = normalizeSenderEmail(message.sender.email);
+            if (!senderEmail) continue;
+            const key = `${mailbox.id}:${senderEmail}`;
+            const current = candidates.get(key);
+            const receivedAt = message.receivedOn;
+            candidates.set(key, {
+              connectionId: mailbox.id,
+              accountEmail: mailbox.email,
+              senderEmail,
+              senderName: message.sender.name || current?.senderName,
+              count: (current?.count ?? 0) + 1,
+              oldestAt:
+                current && new Date(current.oldestAt) < new Date(receivedAt)
+                  ? current.oldestAt
+                  : receivedAt,
+              latestAt:
+                current && new Date(current.latestAt) > new Date(receivedAt)
+                  ? current.latestAt
+                  : receivedAt,
+            });
+          }
+        }
+      } while (cursor && scanned < 2000);
+    }
+
+    return [...candidates.values()]
+      .sort((a, b) => b.count - a.count || b.latestAt.localeCompare(a.latestAt))
+      .slice(0, 100);
+  }
+
+  async listCleanupRules(connectionId?: string) {
+    if (connectionId) await this.connection(connectionId);
+    return this.db.query.cleanupRule.findMany({
+      where: connectionId
+        ? and(eq(cleanupRule.userId, this.userId), eq(cleanupRule.connectionId, connectionId))
+        : eq(cleanupRule.userId, this.userId),
+      orderBy: desc(cleanupRule.createdAt),
+    });
+  }
+
+  async createCleanupRule(
+    connectionId: string,
+    senderEmail: string,
+    action: 'archive' | 'trash',
+    ageDays: number,
+  ) {
+    await this.connection(connectionId);
+    const email = normalizeSenderEmail(senderEmail);
+    if (!email || !email.includes('@')) throw new Error('Enter a valid sender email');
+    const now = new Date();
+    const [rule] = await this.db
+      .insert(cleanupRule)
+      .values({
+        id: crypto.randomUUID(),
+        userId: this.userId,
+        connectionId,
+        senderEmail: email,
+        action,
+        ageDays,
+        enabled: true,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: [cleanupRule.connectionId, cleanupRule.senderEmail, cleanupRule.action],
+        set: { ageDays, enabled: true, updatedAt: now },
+      })
+      .returning();
+    return rule;
+  }
+
+  async setCleanupRuleEnabled(id: string, enabled: boolean) {
+    const [rule] = await this.db
+      .update(cleanupRule)
+      .set({ enabled, updatedAt: new Date() })
+      .where(and(eq(cleanupRule.id, id), eq(cleanupRule.userId, this.userId)))
+      .returning();
+    if (!rule) throw new Error('Cleanup rule not found');
+    return rule;
+  }
+
+  async deleteCleanupRule(id: string) {
+    const rows = await this.db
+      .delete(cleanupRule)
+      .where(and(eq(cleanupRule.id, id), eq(cleanupRule.userId, this.userId)))
+      .returning({ id: cleanupRule.id });
+    return rows.length > 0;
+  }
+
+  async runCleanupRule(id: string) {
+    const rule = await this.db.query.cleanupRule.findFirst({
+      where: and(eq(cleanupRule.id, id), eq(cleanupRule.userId, this.userId)),
+    });
+    if (!rule) throw new Error('Cleanup rule not found');
+    const mailbox = await this.connection(rule.connectionId);
+    const driver = connectionToDriver(mailbox);
+    const sender = rule.senderEmail.replace(/["\\]/g, '');
+    const query = `from:"${sender}"${rule.ageDays ? ` older_than:${rule.ageDays}d` : ''}`;
+    const threadIds = new Set<string>();
+    let pageToken: string | undefined;
+    try {
+      do {
+        const page = await driver.list({
+          folder: 'all',
+          query,
+          maxResults: 500,
+          pageToken,
+        });
+        page.threads.forEach(({ id }) => threadIds.add(id));
+        pageToken = page.nextPageToken ?? undefined;
+      } while (pageToken);
+
+      const change =
+        rule.action === 'trash'
+          ? { addLabels: ['TRASH'], removeLabels: ['INBOX'] }
+          : { addLabels: [], removeLabels: ['INBOX'] };
+      const ids = [...threadIds];
+      for (let offset = 0; offset < ids.length; offset += 4) {
+        await Promise.all(
+          ids.slice(offset, offset + 4).map((threadId) =>
+            mutateAndReconcile(this.env, mailbox, threadId, change),
+          ),
+        );
+      }
+      await this.db
+        .update(cleanupRule)
+        .set({ lastRunAt: new Date(), updatedAt: new Date() })
+        .where(eq(cleanupRule.id, rule.id));
+      await recordMailboxAction(this.env, {
+        userId: this.userId,
+        connectionId: mailbox.id,
+        action: rule.action === 'trash' ? 'cleanup trash' : 'cleanup archive',
+        status: 'succeeded',
+        detail: `${ids.length} thread${ids.length === 1 ? '' : 's'} from ${rule.senderEmail}`,
+      });
+      return { changed: ids.length };
+    } catch (error) {
+      await recordMailboxAction(this.env, {
+        userId: this.userId,
+        connectionId: mailbox.id,
+        action: rule.action === 'trash' ? 'cleanup trash' : 'cleanup archive',
+        status: 'failed',
+        detail: errorText(error),
+      });
+      throw error;
+    }
   }
 
   async listReminders(connectionId?: string) {
@@ -1411,14 +1604,42 @@ async function processDueBundles(env: ZeroEnv, now: Date) {
   return released;
 }
 
+async function processCleanupRules(env: ZeroEnv, now: Date) {
+  const { db } = createDb(env.DB);
+  const rules = await db.query.cleanupRule.findMany({
+    where: and(
+      eq(cleanupRule.enabled, true),
+      or(isNull(cleanupRule.lastRunAt), lte(cleanupRule.lastRunAt, new Date(now.getTime() - 86_400_000))),
+    ),
+    orderBy: asc(cleanupRule.lastRunAt),
+    limit: 50,
+  });
+  let changed = 0;
+  for (const rule of rules) {
+    try {
+      const result = await new MailboxWorkflows(env, rule.userId).runCleanupRule(rule.id);
+      changed += result.changed;
+    } catch (error) {
+      console.error('[MAILBOX_WORKFLOWS] Cleanup rule failed', {
+        ruleId: rule.id,
+        connectionId: rule.connectionId,
+        error: errorText(error),
+      });
+    }
+  }
+  return { rules: rules.length, changed };
+}
+
 export async function processMailboxWorkflowCron(env: ZeroEnv, now = new Date()) {
   const reminders = await processDueReminders(env, now);
   const bundles = await processDueBundles(env, now);
-  return { reminders, bundles };
+  const cleanup = await processCleanupRules(env, now);
+  return { reminders, bundles, cleanup };
 }
 
 export const mailboxWorkflowInternals = {
   classifyBundleKind,
+  processCleanupRules,
   processDueBundles,
   processDueReminders,
 };

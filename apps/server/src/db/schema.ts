@@ -639,6 +639,39 @@ export const mailboxAction = createTable(
   ],
 );
 
+export const cleanupRule = createTable(
+  'cleanup_rule',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    connectionId: text('connection_id')
+      .notNull()
+      .references(() => connection.id, { onDelete: 'cascade' }),
+    senderEmail: text('sender_email').notNull(),
+    action: text('action').$type<'archive' | 'trash'>().notNull(),
+    ageDays: integer('age_days').notNull(),
+    enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+    lastRunAt: integer('last_run_at', { mode: 'timestamp_ms' }),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+  },
+  (t) => [
+    unique('mail0_cleanup_rule_connection_sender_unique').on(
+      t.connectionId,
+      t.senderEmail,
+      t.action,
+    ),
+    index('mail0_cleanup_rule_due_idx').on(t.enabled, t.lastRunAt),
+    index('mail0_cleanup_rule_user_idx').on(t.userId, t.connectionId),
+  ],
+);
+
 export const rateLimit = createTable('rate_limit', {
   id: text('id').primaryKey(),
   key: text('key').notNull().unique(),

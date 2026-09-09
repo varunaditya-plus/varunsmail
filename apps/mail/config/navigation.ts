@@ -17,6 +17,7 @@ import {
 } from '@/components/icons/icons';
 import {
   Activity,
+  Brush,
   ListFilter,
   ListTodo,
   MailCheck,
@@ -118,6 +119,12 @@ export const navigationConfig: Record<string, NavConfig> = {
             title: 'Sync & activity',
             url: '/mail/activity',
             icon: Activity,
+          },
+          {
+            id: 'cleanup',
+            title: 'Sender cleanup',
+            url: '/mail/cleanup',
+            icon: Brush,
           },
         ],
       },
