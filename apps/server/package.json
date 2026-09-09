@@ -85,7 +85,7 @@
     "twilio": "5.7.0",
     "ulid": "3.0.1",
     "uuid": "11.1.0",
-    "wrangler": "catalog:",
+    "wrangler": "4.36.0",
     "zod": "catalog:"
   },
   "devDependencies": {
