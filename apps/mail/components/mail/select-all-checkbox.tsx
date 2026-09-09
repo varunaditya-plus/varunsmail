@@ -12,7 +12,13 @@ import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { useQueryState } from 'nuqs';
 
-export default function SelectAllCheckbox({ className }: { className?: string }) {
+export default function SelectAllCheckbox({
+  className,
+  compact = false,
+}: {
+  className?: string;
+  compact?: boolean;
+}) {
   const [mail, setMail] = useMail();
   const [, loadedThreads] = useThreads();
   const [{ value: query }] = useSearchValue();
@@ -135,6 +141,7 @@ export default function SelectAllCheckbox({ className }: { className?: string })
         className={cn(
           'text-muted-foreground flex items-center gap-1 text-xs font-medium transition-colors',
           isIndeterminate && 'text-primary',
+          compact && 'sr-only',
         )}
       >
         <span

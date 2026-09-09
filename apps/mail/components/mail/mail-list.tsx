@@ -36,7 +36,6 @@ import { useThreadLabels } from '@/hooks/use-labels';
 import { useSettings } from '@/hooks/use-settings';
 import { useKeyState } from '@/hooks/use-hot-key';
 import { VList, type VListHandle } from 'virtua';
-import { BimiAvatar } from '../ui/bimi-avatar';
 import { RenderLabels } from './render-labels';
 import { Badge } from '@/components/ui/badge';
 import { useDraft } from '@/hooks/use-drafts';
@@ -45,12 +44,12 @@ import { Skeleton } from '../ui/skeleton';
 import { m } from '@/paraglide/messages';
 import { useParams } from 'react-router';
 import { Button } from '../ui/button';
-import { Avatar } from '../ui/avatar';
 import { useQueryState } from 'nuqs';
 import { useAtom } from 'jotai';
 
 const getListItemKey = (item: { id: string; connectionId?: string; key?: string }) =>
   item.key ?? threadKey(item.id, item.connectionId);
+const LOADING_ROWS = ['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot', 'golf', 'hotel'];
 
 const Thread = memo(
   function Thread({
@@ -213,6 +212,19 @@ const Thread = memo(
       return { isMailSelected: isSelected, isMailBulkSelected: isBulkSelected };
     }, [threadId, idToUse, message.connectionId, openConnectionId, keyToUse, mailState]);
 
+    const handleToggleBulkSelection = useCallback(
+      (event: React.MouseEvent) => {
+        event.stopPropagation();
+        setMail((prev: Config) => ({
+          ...prev,
+          bulkSelected: prev.bulkSelected.includes(keyToUse)
+            ? prev.bulkSelected.filter((id) => id !== keyToUse)
+            : [...prev.bulkSelected, keyToUse],
+        }));
+      },
+      [keyToUse, setMail],
+    );
+
     const { isFolderInbox, isFolderSpam, isFolderSent, isFolderBin } = useMemo(
       () => ({
         isFolderInbox: folder === FOLDERS.INBOX || folder === 'unified' || !folder,
@@ -231,103 +243,185 @@ const Thread = memo(
     const content = useMemo(() => {
       if (!latestMessage || !getThreadData) return null;
 
+      const sender = isFolderSent
+        ? latestMessage.to.map(({ email }) => email).join(', ')
+        : cleanName || latestMessage.sender.email;
+
       return (
         <div
-          className={cn('select-none border-b md:my-1 md:border-none')}
+          className="h-11 select-none border-b border-border/70"
           onClick={onClick ? onClick(latestMessage) : undefined}
-          //   onMouseEnter={() => {
-          //     window.dispatchEvent(new CustomEvent('emailHover', { detail: { id: idToUse } }));
-          //   }}
-          //   onMouseLeave={() => {
-          //     window.dispatchEvent(new CustomEvent('emailHover', { detail: { id: null } }));
-          //   }}
         >
           <div
             data-thread-id={keyToUse}
             key={keyToUse}
             className={cn(
-              'hover:bg-offsetLight dark:hover:bg-primary/5 group relative mx-1 flex cursor-pointer flex-col items-start rounded-lg py-2 text-left text-sm hover:opacity-100',
-              (isMailSelected || isMailBulkSelected || isKeyboardFocused) &&
-                'border-border bg-primary/5 opacity-100',
-              isKeyboardFocused && 'ring-primary/50',
-              'relative',
-              'group',
+              'group relative flex h-11 w-full cursor-pointer items-center gap-1 px-2 text-left text-sm transition-colors',
+              displayUnread ? 'bg-background' : 'bg-muted/25 text-foreground/80',
+              'hover:bg-offsetLight dark:hover:bg-primary/5',
+              (isMailSelected || isMailBulkSelected || isKeyboardFocused) && 'bg-primary/10',
+              isKeyboardFocused && 'ring-primary/50 ring-1 ring-inset',
             )}
           >
-            <div
-              className={cn(
-                'dark:bg-panelDark z-25 absolute right-2 flex -translate-y-1/2 items-center gap-1 rounded-xl border bg-white p-1 opacity-0 shadow-sm group-hover:opacity-100',
-                index === 0 ? 'top-4' : 'top-[-1px]',
-              )}
+            <button
+              type="button"
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded hover:bg-black/5 dark:hover:bg-white/10"
+              aria-label={isMailBulkSelected ? 'Deselect conversation' : 'Select conversation'}
+              aria-pressed={isMailBulkSelected}
+              onClick={handleToggleBulkSelection}
             >
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-6 w-6 overflow-visible [&_svg]:size-3.5"
-                    onClick={handleToggleStar}
-                  >
-                    <Star2
-                      className={cn(
-                        'h-4 w-4',
-                        displayStarred
-                          ? 'fill-yellow-400 stroke-yellow-400'
-                          : 'fill-transparent stroke-[#9D9D9D] dark:stroke-[#9D9D9D]',
-                      )}
-                    />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent
-                  side={index === 0 ? 'bottom' : 'top'}
-                  className="mb-1 bg-white dark:bg-[#1A1A1A]"
+              {isMailBulkSelected ? (
+                <span className="flex h-4 w-4 items-center justify-center rounded-sm bg-[#006FFE]">
+                  <Check className="h-3 w-3 text-white" />
+                </span>
+              ) : (
+                <span className="border-muted-foreground/60 h-4 w-4 rounded-sm border" />
+              )}
+            </button>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 shrink-0 [&_svg]:size-4"
+                  onClick={handleToggleStar}
                 >
-                  {displayStarred
-                    ? m['common.threadDisplay.unstar']()
-                    : m['common.threadDisplay.star']()}
-                </TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
+                  <Star2
                     className={cn(
-                      'h-6 w-6 [&_svg]:size-3.5',
-                      displayImportant ? 'hover:bg-orange-200/70 dark:hover:bg-orange-800/40' : '',
+                      displayStarred
+                        ? 'fill-yellow-400 stroke-yellow-400'
+                        : 'fill-transparent stroke-[#9D9D9D] dark:stroke-[#9D9D9D]',
                     )}
-                    onClick={handleToggleImportant}
-                  >
-                    <ExclamationCircle
-                      className={cn(displayImportant ? 'fill-orange-400' : 'fill-[#9D9D9D]')}
-                    />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent
-                  side={index === 0 ? 'bottom' : 'top'}
-                  className="dark:bg-panelDark mb-1 bg-white"
+                  />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side={index === 0 ? 'bottom' : 'top'} className="p-1 text-xs">
+                {displayStarred
+                  ? m['common.threadDisplay.unstar']()
+                  : m['common.threadDisplay.star']()}
+              </TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className={cn(
+                    'hidden h-7 w-7 shrink-0 sm:inline-flex [&_svg]:size-4',
+                    displayImportant && 'hover:bg-orange-200/70 dark:hover:bg-orange-800/40',
+                  )}
+                  onClick={handleToggleImportant}
                 >
-                  {m['common.mail.toggleImportant']()}
-                </TooltipContent>
-              </Tooltip>
+                  <ExclamationCircle
+                    className={cn(
+                      displayImportant
+                        ? 'fill-orange-400 stroke-orange-500'
+                        : 'fill-transparent stroke-[#9D9D9D]',
+                    )}
+                  />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side={index === 0 ? 'bottom' : 'top'} className="p-1 text-xs">
+                {m['common.mail.toggleImportant']()}
+              </TooltipContent>
+            </Tooltip>
+
+            <div className="flex w-28 shrink-0 items-center gap-1.5 sm:w-32 xl:w-40">
+              {message.connectionId && message.account ? (
+                <span
+                  className="h-2.5 w-2.5 shrink-0 rounded-full"
+                  style={{ backgroundColor: getAccountColor(message.connectionId) }}
+                  aria-label={'Account ' + message.account.email}
+                  title={message.account.email}
+                />
+              ) : null}
+              {isGroupThread ? <GroupPeople className="h-3.5 w-3.5 shrink-0 opacity-60" /> : null}
+              <span
+                className={cn('min-w-0 truncate', displayUnread ? 'font-semibold' : 'font-medium')}
+                title={sender}
+              >
+                {highlightText(sender, searchValue.highlight)}
+              </span>
+              {getThreadData.totalReplies > 1 ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="shrink-0 text-xs opacity-60">
+                      [{getThreadData.totalReplies}]
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent className="p-1 text-xs">
+                    {m['common.mail.replies']({ count: getThreadData.totalReplies })}
+                  </TooltipContent>
+                </Tooltip>
+              ) : null}
+              {hasDraft ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="inline-flex shrink-0 items-center">
+                      <PencilCompose className="h-3 w-3 fill-blue-500 dark:fill-blue-400" />
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent className="p-1 text-xs">Draft</TooltipContent>
+                </Tooltip>
+              ) : null}
+            </div>
+
+            <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
+              <span
+                className={cn(
+                  'min-w-0 shrink truncate',
+                  displayUnread ? 'font-semibold' : 'font-normal',
+                )}
+              >
+                {highlightText(latestMessage.subject, searchValue.highlight)}
+              </span>
+              {emailContent ? (
+                <>
+                  <span className="text-muted-foreground shrink-0">-</span>
+                  <span className="text-muted-foreground min-w-0 flex-1 truncate">
+                    {highlightText(emailContent, searchValue.highlight)}
+                  </span>
+                </>
+              ) : null}
+              {threadLabels.length ? (
+                <div className="hidden max-w-36 shrink-0 overflow-hidden lg:block">
+                  <RenderLabels labels={threadLabels} />
+                </div>
+              ) : null}
+            </div>
+
+            {latestMessage.receivedOn ? (
+              <p
+                className={cn(
+                  'text-muted-foreground shrink-0 whitespace-nowrap pr-1 text-xs font-normal transition-opacity group-hover:opacity-0 group-focus-within:opacity-0 dark:text-[#8C8C8C]',
+                  isMailSelected && 'text-foreground',
+                )}
+              >
+                {formatDate(latestMessage.receivedOn.split('.')[0] || '')}
+              </p>
+            ) : null}
+
+            <div className="bg-background/95 pointer-events-none absolute inset-y-0 right-2 z-20 flex items-center gap-1 pl-2 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100">
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
+                    type="button"
                     variant="ghost"
                     size="icon"
-                    className="h-6 w-6 [&_svg]:size-3.5"
-                    onClick={(e) => {
-                      e.stopPropagation();
+                    className="h-7 w-7 [&_svg]:size-4"
+                    onClick={(event) => {
+                      event.stopPropagation();
                       moveThreadTo('archive');
                     }}
                   >
                     <Archive2 className="fill-[#9D9D9D]" />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent
-                  side={index === 0 ? 'bottom' : 'top'}
-                  className="dark:bg-panelDark mb-1 bg-white"
-                >
+                <TooltipContent side={index === 0 ? 'bottom' : 'top'} className="p-1 text-xs">
                   {m['common.threadDisplay.archive']()}
                 </TooltipContent>
               </Tooltip>
@@ -335,215 +429,23 @@ const Thread = memo(
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button
+                      type="button"
                       variant="ghost"
                       size="icon"
-                      className="h-6 w-6 hover:bg-[#FDE4E9] dark:hover:bg-[#411D23] [&_svg]:size-3.5"
-                      onClick={(e: React.MouseEvent) => {
-                        e.stopPropagation();
+                      className="h-7 w-7 hover:bg-[#FDE4E9] dark:hover:bg-[#411D23] [&_svg]:size-4"
+                      onClick={(event) => {
+                        event.stopPropagation();
                         moveThreadTo('bin');
                       }}
                     >
                       <Trash className="fill-[#F43F5E]" />
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent
-                    side={index === 0 ? 'bottom' : 'top'}
-                    className="dark:bg-panelDark mb-1 bg-white"
-                  >
+                  <TooltipContent side={index === 0 ? 'bottom' : 'top'} className="p-1 text-xs">
                     {m['common.actions.Bin']()}
                   </TooltipContent>
                 </Tooltip>
               ) : null}
-            </div>
-
-            <div
-              className={`relative flex w-full items-center justify-between gap-4 px-4 ${displayUnread ? '' : 'opacity-60'}`}
-            >
-              <div>
-                {isMailBulkSelected ? (
-                  <Avatar
-                    className={cn(
-                      'h-8 w-8 rounded-full',
-                      displayUnread && !isMailSelected && !isFolderSent ? '' : 'border',
-                    )}
-                  >
-                    <div
-                      className="flex h-full w-full items-center justify-center rounded-full bg-[#006FFE] p-2 dark:bg-[#006FFE]"
-                      onClick={(e: React.MouseEvent) => {
-                        e.stopPropagation();
-                        setMail((prev: Config) => ({
-                          ...prev,
-                          bulkSelected: prev.bulkSelected.filter((id: string) => id !== keyToUse),
-                        }));
-                      }}
-                    >
-                      <Check className="h-4 w-4 text-white" />
-                    </div>
-                  </Avatar>
-                ) : isGroupThread ? (
-                  <Avatar
-                    className={cn(
-                      'h-8 w-8 rounded-full',
-                      displayUnread && !isMailSelected && !isFolderSent ? '' : 'border',
-                    )}
-                  >
-                    <div className="flex h-full w-full items-center justify-center rounded-full bg-[#FFFFFF] p-2 dark:bg-[#373737]">
-                      <GroupPeople className="h-4 w-4" />
-                    </div>
-                  </Avatar>
-                ) : (
-                  <BimiAvatar
-                    email={latestMessage.sender.email}
-                    name={cleanName || latestMessage.sender.email}
-                    className={cn(
-                      'h-8 w-8 rounded-full',
-                      displayUnread && !isMailSelected && !isFolderSent ? '' : 'border',
-                    )}
-                  />
-                )}
-                {/* {displayUnread && !isMailSelected && !isFolderSent ? (
-                  <>
-                    <span className="absolute left-2 top-2 size-1.5 rounded bg-[#006FFE]" />
-                    <span className="absolute left-[11px] top-4 size-1 rounded bg-[#006FFE]" />
-                  </>
-                ) : null} */}
-              </div>
-
-              <div className="flex w-full justify-between">
-                <div className="w-full">
-                  <div className="flex w-full flex-row items-center justify-between">
-                    <div className="flex min-w-0 flex-row items-center gap-[4px]">
-                      <span
-                        className={cn(
-                          displayUnread && !isMailSelected ? 'font-bold' : 'font-medium',
-                          'text-md flex min-w-0 items-baseline gap-1 group-hover:opacity-100',
-                        )}
-                      >
-                        {isFolderSent ? (
-                          <span
-                            className={cn(
-                              'overflow-hidden truncate text-sm md:max-w-[15ch] xl:max-w-[25ch]',
-                            )}
-                          >
-                            {highlightText(latestMessage.subject, searchValue.highlight)}
-                          </span>
-                        ) : (
-                          <div className="flex min-w-0 items-center gap-1">
-                            {message.connectionId && message.account ? (
-                              <span
-                                className="text-muted-foreground flex max-w-24 shrink-0 items-center gap-1 text-[10px] font-normal sm:max-w-36 xl:max-w-48"
-                                aria-label={`Account ${message.account.email}`}
-                                title={message.account.email}
-                              >
-                                <span
-                                  className="h-2.5 w-2.5 shrink-0 rounded-full"
-                                  style={{ backgroundColor: getAccountColor(message.connectionId) }}
-                                  aria-hidden="true"
-                                />
-                                <span className="truncate">{message.account.email}</span>
-                              </span>
-                            ) : null}
-                            <span className={cn('min-w-0 truncate text-sm')}>
-                              {highlightText(
-                                cleanNameDisplay(latestMessage.sender.name) || '',
-                                searchValue.highlight,
-                              )}
-                            </span>
-                            {displayUnread && !isMailSelected && !isFolderSent ? (
-                              <>
-                                <span className="ml-0.5 size-2 rounded-full bg-[#006FFE]" />
-                              </>
-                            ) : null}
-                          </div>
-                        )}{' '}
-                        {/* {!isFolderSent ? (
-                          <span className="hidden items-center space-x-2 md:flex">
-                            <RenderLabels labels={threadLabels} />
-                          </span>
-                        ) : null} */}
-                      </span>
-                      {getThreadData.totalReplies > 1 ? (
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <span className="rounded-md text-xs opacity-70">
-                              [{getThreadData.totalReplies}]
-                            </span>
-                          </TooltipTrigger>
-                          <TooltipContent className="p-1 text-xs">
-                            {m['common.mail.replies']({ count: getThreadData.totalReplies })}
-                          </TooltipContent>
-                        </Tooltip>
-                      ) : null}
-                      {hasDraft ? (
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <span className="inline-flex items-center">
-                              <PencilCompose className="h-3 w-3 fill-blue-500 dark:fill-blue-400" />
-                            </span>
-                          </TooltipTrigger>
-                          <TooltipContent className="p-1 text-xs">Draft</TooltipContent>
-                        </Tooltip>
-                      ) : null}
-                      {/* {hasNotes ? (
-                        <span className="inline-flex items-center">
-                          <StickyNote className="h-3 w-3 fill-amber-500 stroke-amber-500 dark:fill-amber-400 dark:stroke-amber-400" />
-                        </span>
-                      ) : null} */}
-                      <MailLabels labels={optimisticLabels} />
-                    </div>
-                    {latestMessage.receivedOn ? (
-                      <p
-                        className={cn(
-                          'text-muted-foreground text-nowrap text-xs font-normal opacity-70 transition-opacity group-hover:opacity-100 dark:text-[#8C8C8C]',
-                          isMailSelected && 'opacity-100',
-                        )}
-                      >
-                        {formatDate(latestMessage.receivedOn.split('.')[0] || '')}
-                      </p>
-                    ) : null}
-                  </div>
-                  <div className="flex justify-between">
-                    {isFolderSent ? (
-                      <p
-                        className={cn(
-                          'mt-1 line-clamp-1 max-w-[50ch] overflow-hidden text-sm text-[#8C8C8C] md:max-w-[25ch]',
-                        )}
-                      >
-                        {latestMessage.to.map((e) => e.email).join(', ')}
-                      </p>
-                    ) : (
-                      <p
-                        className={cn(
-                          'mt-1 line-clamp-1 w-[95%] min-w-0 overflow-hidden text-sm text-[#8C8C8C]',
-                        )}
-                      >
-                        {highlightText(latestMessage.subject, searchValue.highlight)}
-                      </p>
-                    )}
-                    {/* <div className="hidden md:flex">
-                      {getThreadData.labels ? <MailLabels labels={getThreadData.labels} /> : null}
-                    </div> */}
-                    {threadLabels && (
-                      <div className="mr-0 flex w-fit items-center justify-end gap-1">
-                        {!isFolderSent ? <RenderLabels labels={threadLabels} /> : null}
-                        {/* {getThreadData.labels ? <MailLabels labels={getThreadData.labels} /> : null} */}
-                      </div>
-                    )}
-                  </div>
-                  {emailContent && (
-                    <div className="text-muted-foreground mt-2 line-clamp-2 text-xs">
-                      {highlightText(emailContent, searchValue.highlight)}
-                    </div>
-                  )}
-                  {/* {mainSearchTerm && (
-                    <div className="text-muted-foreground mt-1 flex items-center gap-1 text-xs">
-                      <span className="bg-primary/10 text-primary rounded px-1.5 py-0.5">
-                        {mainSearchTerm}
-                      </span>
-                    </div>
-                  )} */}
-                </div>
-              </div>
             </div>
           </div>
         </div>
@@ -551,38 +453,61 @@ const Thread = memo(
     }, [
       latestMessage,
       getThreadData,
-      optimisticState,
-      idToUse,
-      folder,
-      isFolderBin,
-      isFolderSent,
-      isFolderSpam,
-      isFolderInbox,
+      keyToUse,
       onClick,
-      searchValue,
       displayUnread,
+      displayStarred,
+      displayImportant,
       isMailSelected,
       isMailBulkSelected,
-      threadLabels,
-      optimisticLabels,
+      isKeyboardFocused,
+      handleToggleBulkSelection,
+      handleToggleStar,
+      handleToggleImportant,
+      message.connectionId,
+      message.account,
+      isGroupThread,
+      isFolderSent,
+      isFolderBin,
+      cleanName,
+      searchValue.highlight,
+      hasDraft,
       emailContent,
+      threadLabels,
+      index,
+      moveThreadTo,
     ]);
 
-    return latestMessage ? (
-      !optimisticState.shouldHide && idToUse ? (
-        <ThreadContextMenu
-          threadId={idToUse}
-          connectionId={message.connectionId}
-          threadKey={keyToUse}
-          isInbox={isFolderInbox}
-          isSpam={isFolderSpam}
-          isSent={isFolderSent}
-          isBin={isFolderBin}
-        >
-          {content}
-        </ThreadContextMenu>
-      ) : null
-    ) : null;
+    if (optimisticState.shouldHide) return null;
+
+    if (!latestMessage || !getThreadData || !idToUse) {
+      return (
+        <div className="flex h-11 select-none items-center gap-1 border-b border-border/70 px-2">
+          <div className="flex h-7 w-7 shrink-0 items-center justify-center">
+            <Skeleton className="bg-muted h-4 w-4 rounded" />
+          </div>
+          <div className="h-7 w-7 shrink-0" />
+          <div className="hidden h-7 w-7 shrink-0 sm:block" />
+          <Skeleton className="bg-muted h-4 w-28 shrink-0 rounded sm:w-32 xl:w-40" />
+          <Skeleton className="bg-muted h-4 min-w-0 flex-1 rounded" />
+          <Skeleton className="bg-muted h-3 w-12 shrink-0 rounded" />
+        </div>
+      );
+    }
+
+    return (
+      <ThreadContextMenu
+        threadId={idToUse}
+        connectionId={message.connectionId}
+        threadKey={keyToUse}
+        isInbox={isFolderInbox}
+        isSpam={isFolderSpam}
+        isSent={isFolderSent}
+        isBin={isFolderBin}
+      >
+        {content}
+      </ThreadContextMenu>
+    );
   },
   (prev, next) => {
     const isSameMessage =
@@ -605,75 +530,66 @@ const Draft = memo(({ message, index }: { message: { id: string }; index: number
   const handleMailClick = useCallback(() => {
     setComposeOpen('true');
     setDraftId(message.id);
-    return;
-  }, [message.id]);
+  }, [message.id, setComposeOpen, setDraftId]);
 
   const handleDeleteDraft = useCallback(
-    (e: React.MouseEvent) => {
-      e.stopPropagation();
+    (event: React.MouseEvent) => {
+      event.stopPropagation();
       optimisticDeleteDraft(message.id);
     },
     [message.id, optimisticDeleteDraft],
   );
 
-  if (optimisticState.shouldHide) {
-    return null;
-  }
+  if (optimisticState.shouldHide) return null;
 
   if (!draft) {
     return (
-      <div className="select-none py-1">
-        <div
-          key={message.id}
-          className={cn(
-            'group relative mx-[8px] flex cursor-pointer flex-col items-start overflow-clip rounded-[10px] border-transparent py-3 text-left text-sm',
-          )}
-        >
-          <div
-            className={cn(
-              'bg-primary absolute inset-y-0 left-0 w-1 -translate-x-2 transition-transform ease-out',
-            )}
-          />
-          <div className="flex w-full items-center justify-between gap-4 px-4">
-            <div className="flex w-full justify-between">
-              <div className="w-full">
-                <div className="flex w-full flex-row items-center justify-between">
-                  <div className="flex flex-row items-center gap-[4px]">
-                    <Skeleton className="bg-muted h-4 w-32 rounded" />
-                  </div>
-                </div>
-                <div className="flex justify-between">
-                  <Skeleton className="bg-muted mt-1 h-4 w-48 rounded" />
-                </div>
-              </div>
-            </div>
-          </div>
+      <div className="flex h-11 select-none items-center gap-1 border-b border-border/70 px-2">
+        <div className="flex h-7 w-7 shrink-0 items-center justify-center">
+          <Skeleton className="bg-muted h-4 w-4 rounded" />
         </div>
+        <div className="h-7 w-7 shrink-0" />
+        <div className="hidden h-7 w-7 shrink-0 sm:block" />
+        <Skeleton className="bg-muted h-4 w-28 shrink-0 rounded sm:w-32 xl:w-40" />
+        <Skeleton className="bg-muted h-4 min-w-0 flex-1 rounded" />
+        <Skeleton className="bg-muted h-3 w-12 shrink-0 rounded" />
       </div>
     );
   }
 
   return (
-    <div className="select-none py-1" onClick={handleMailClick}>
-      <div
-        key={message.id}
-        className={cn(
-          'hover:bg-offsetLight dark:hover:bg-primary/5 group relative mx-[8px] flex cursor-pointer flex-col items-start overflow-visible rounded-[10px] border-transparent py-3 text-left text-sm hover:opacity-100',
-        )}
-      >
+    <div
+      className="h-11 select-none border-b border-border/70"
+      onClick={handleMailClick}
+    >
+      <div className="hover:bg-offsetLight dark:hover:bg-primary/5 group relative flex h-11 w-full cursor-pointer items-center gap-1 px-2 text-left text-sm transition-colors">
+        <div className="flex h-7 w-7 shrink-0 items-center justify-center">
+          <PencilCompose className="h-4 w-4 fill-blue-500 dark:fill-blue-400" />
+        </div>
+        <div className="h-7 w-7 shrink-0" />
+        <div className="hidden h-7 w-7 shrink-0 sm:block" />
+        <span className="w-28 shrink-0 truncate font-medium sm:w-32 xl:w-40">
+          {cleanNameDisplay(draft.to?.[0] || 'No Recipient') || ''}
+        </span>
+        <span className="text-muted-foreground min-w-0 flex-1 truncate">
+          {draft.subject}
+        </span>
+        {draft.rawMessage?.internalDate ? (
+          <p className="text-muted-foreground shrink-0 whitespace-nowrap pr-1 text-xs font-normal transition-opacity group-hover:opacity-0 group-focus-within:opacity-0 dark:text-[#8C8C8C]">
+            {formatDate(Number(draft.rawMessage.internalDate))}
+          </p>
+        ) : null}
         <div
-          className={cn(
-            'dark:bg-panelDark shadow-xs absolute right-2 z-20 flex -translate-y-1/2 items-center gap-1 rounded-xl border bg-white p-1 opacity-0 group-hover:opacity-100',
-            index === 0 ? 'top-4' : 'top-[-1px]',
-          )}
+          className="bg-background/95 pointer-events-none absolute inset-y-0 right-2 z-20 flex items-center pl-2 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100"
           aria-busy={optimisticState.isRemoving}
         >
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
+                type="button"
                 variant="ghost"
                 size="icon"
-                className="h-6 w-6 hover:bg-[#FDE4E9] dark:hover:bg-[#411D23] [&_svg]:size-3.5"
+                className="h-7 w-7 hover:bg-[#FDE4E9] dark:hover:bg-[#411D23] [&_svg]:size-4"
                 aria-label="Delete draft"
                 disabled={optimisticState.isRemoving}
                 onClick={handleDeleteDraft}
@@ -681,51 +597,10 @@ const Draft = memo(({ message, index }: { message: { id: string }; index: number
                 <Trash className="fill-[#F43F5E]" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent
-              side={index === 0 ? 'bottom' : 'top'}
-              className="dark:bg-panelDark mb-1 bg-white"
-            >
+            <TooltipContent side={index === 0 ? 'bottom' : 'top'} className="p-1 text-xs">
               {m['common.actions.Bin']()}
             </TooltipContent>
           </Tooltip>
-        </div>
-        <div className="flex w-full items-center justify-between gap-4 px-4">
-          <div className="flex w-full justify-between">
-            <div className="w-full">
-              <div className="flex w-full flex-row items-center justify-between">
-                <div className="flex flex-row items-center gap-[4px]">
-                  <span
-                    className={cn(
-                      'font-medium',
-                      'text-md flex items-baseline gap-1 group-hover:opacity-100',
-                    )}
-                  >
-                    <span className={cn('max-w-[25ch] truncate text-sm')}>
-                      {cleanNameDisplay(draft?.to?.[0] || 'No Recipient') || ''}
-                    </span>
-                  </span>
-                </div>
-                {draft.rawMessage?.internalDate && (
-                  <p
-                    className={cn(
-                      'text-muted-foreground text-nowrap text-xs font-normal opacity-70 transition-opacity group-hover:opacity-100 dark:text-[#8C8C8C]',
-                    )}
-                  >
-                    {formatDate(Number(draft.rawMessage?.internalDate))}
-                  </p>
-                )}
-              </div>
-              <div className="flex justify-between">
-                <p
-                  className={cn(
-                    'mt-1 line-clamp-1 max-w-[50ch] text-sm text-[#8C8C8C] md:max-w-[30ch]',
-                  )}
-                >
-                  {draft?.subject}
-                </p>
-              </div>
-            </div>
-          </div>
         </div>
       </div>
     </div>
@@ -759,7 +634,16 @@ export const MailList = memo(
     }, [setAnchorIndex]);
 
     const [
-      { refetch, isLoading, isFetching, isFetchingNextPage, hasNextPage, isError },
+      {
+        data,
+        dataUpdatedAt,
+        refetch,
+        isLoading,
+        isFetching,
+        isFetchingNextPage,
+        hasNextPage,
+        isError,
+      },
       items,
       ,
       loadMore,
@@ -770,6 +654,7 @@ export const MailList = memo(
     const itemsRef = useRef(items);
     const parentRef = useRef<HTMLDivElement>(null);
     const vListRef = useRef<VListHandle>(null);
+    const underfillRequestRef = useRef('');
 
     useEffect(() => {
       itemsRef.current = items;
@@ -970,6 +855,53 @@ export const MailList = memo(
     };
 
     const filteredItems = useMemo(() => items.filter((item) => item.id), [items]);
+    const pageCount = data?.pages.length ?? 0;
+
+    const loadMoreIfUnderfilled = useCallback(() => {
+      const list = vListRef.current;
+      if (
+        isLoading ||
+        isFetching ||
+        isFetchingNextPage ||
+        isFetchingMail ||
+        !hasNextPage ||
+        !list ||
+        list.viewportSize <= 0 ||
+        list.scrollSize > list.viewportSize + 1
+      ) {
+        return;
+      }
+
+      const requestKey = `${dataUpdatedAt}:${pageCount}:${filteredItems.length}`;
+      if (underfillRequestRef.current === requestKey) return;
+      underfillRequestRef.current = requestKey;
+      void loadMore();
+    }, [
+      dataUpdatedAt,
+      filteredItems.length,
+      hasNextPage,
+      isFetching,
+      isFetchingMail,
+      isFetchingNextPage,
+      isLoading,
+      loadMore,
+      pageCount,
+    ]);
+
+    useEffect(() => {
+      const frame = requestAnimationFrame(loadMoreIfUnderfilled);
+      const listContainer = parentRef.current?.querySelector('#mail-list-scroll');
+      if (!listContainer || typeof ResizeObserver === 'undefined') {
+        return () => cancelAnimationFrame(frame);
+      }
+
+      const observer = new ResizeObserver(loadMoreIfUnderfilled);
+      observer.observe(listContainer);
+      return () => {
+        cancelAnimationFrame(frame);
+        observer.disconnect();
+      };
+    }, [loadMoreIfUnderfilled]);
 
     const Comp = useMemo(() => (folder === FOLDERS.DRAFT ? Draft : Thread), [folder]);
 
@@ -977,36 +909,18 @@ export const MailList = memo(
       (index: number) => {
         const item = filteredItems[index];
         return item ? (
-          <>
-            <Comp
-              key={getListItemKey(item)}
-              message={item}
-              isKeyboardFocused={focusedIndex === index && keyboardActive}
-              index={index}
-              onClick={handleMailClick}
-            />
-            {index === filteredItems.length - 1 && (isFetchingNextPage || isFetchingMail) ? (
-              <div className="flex w-full justify-center py-4">
-                <div className="h-4 w-4 animate-spin rounded-full border-2 border-neutral-900 border-t-transparent dark:border-white dark:border-t-transparent" />
-              </div>
-            ) : null}
-          </>
+          <Comp
+            key={getListItemKey(item)}
+            message={item}
+            isKeyboardFocused={focusedIndex === index && keyboardActive}
+            index={index}
+            onClick={handleMailClick}
+          />
         ) : (
           <></>
         );
       },
-      [
-        folder,
-        filteredItems,
-        focusedIndex,
-        keyboardActive,
-        isFetchingMail,
-        isFetchingNextPage,
-        handleMailClick,
-        isLoading,
-        isFetching,
-        hasNextPage,
-      ],
+      [Comp, filteredItems, focusedIndex, keyboardActive, handleMailClick],
     );
 
     return (
@@ -1025,8 +939,16 @@ export const MailList = memo(
               </div>
             ) : null}
             {isLoading ? (
-              <div className="flex h-32 w-full items-center justify-center">
-                <div className="h-4 w-4 animate-spin rounded-full border-2 border-neutral-900 border-t-transparent dark:border-white dark:border-t-transparent" />
+              <div className="w-full" aria-label="Loading conversations">
+                {LOADING_ROWS.map((row) => (
+                  <div key={row} className="border-border/70 flex h-11 items-center gap-3 border-b px-4">
+                    <Skeleton className="h-4 w-4 rounded" />
+                    <Skeleton className="h-4 w-4 rounded-full" />
+                    <Skeleton className="h-3 w-28 rounded sm:w-36" />
+                    <Skeleton className="h-3 min-w-0 flex-1 rounded" />
+                    <Skeleton className="h-3 w-12 rounded" />
+                  </div>
+                ))}
               </div>
             ) : isError && items.length === 0 ? (
               <div className="flex h-48 w-full items-center justify-center px-6" role="alert">
@@ -1069,7 +991,7 @@ export const MailList = memo(
                   ref={vListRef}
                   count={filteredItems.length}
                   overscan={5}
-                  itemSize={100}
+                  itemSize={44}
                   className="scrollbar-none flex-1 overflow-x-hidden"
                   onScroll={() => {
                     if (!vListRef.current) return;
@@ -1091,15 +1013,6 @@ export const MailList = memo(
               </div>
             )}
           </>
-        </div>
-        <div className="w-full pt-2 text-center">
-          {isFetching ? (
-            <div className="text-center">
-              <div className="mx-auto h-4 w-4 animate-spin rounded-full border-2 border-neutral-900 border-t-transparent dark:border-white dark:border-t-transparent" />
-            </div>
-          ) : (
-            <div className="h-2" />
-          )}
         </div>
       </>
     );

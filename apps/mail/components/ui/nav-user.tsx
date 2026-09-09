@@ -83,7 +83,7 @@ function SyncingStatusIndicator({
   return <DropdownMenuItem className="cursor-default">{statusContent}</DropdownMenuItem>;
 }
 
-export function NavUser() {
+export function NavUser({ compact = false }: { compact?: boolean }) {
   const { data: session } = useSession();
   const { data } = useConnections();
   const [isRendered, setIsRendered] = useState(false);
@@ -206,26 +206,38 @@ export function NavUser() {
     setTheme(theme === 'dark' ? 'light' : 'dark');
   };
 
-  if (!isRendered) return null;
-  if (!session) return null;
+  if (!isRendered || !session || !activeAccount) {
+    return <div className="bg-muted h-8 w-8 shrink-0 animate-pulse rounded-full" aria-hidden="true" />;
+  }
 
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center gap-3">
-        {state === 'collapsed' ? (
+        {compact || state === 'collapsed' ? (
           activeAccount && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <div className="flex cursor-pointer items-center">
+                <button
+                  type="button"
+                  className="flex cursor-pointer items-center rounded-full focus-visible:outline-none focus-visible:ring-2"
+                  aria-label="Account menu"
+                >
                   <div className="relative">
-                    <Avatar className="relative left-0.5 size-7 rounded-[5px]">
+                    <Avatar
+                      className={cn(
+                        'relative size-7',
+                        compact ? 'size-8 rounded-full' : 'left-0.5 rounded-[5px]',
+                      )}
+                    >
                       <AvatarImage
-                        className="rounded-[5px]"
+                        className={compact ? 'rounded-full' : 'rounded-[5px]'}
                         src={activeAccount?.picture || undefined}
                         alt={activeAccount?.name || activeAccount?.email}
                       />
 
-                      <AvatarFallback className="rounded-[5px] text-[10px]">
+                      <AvatarFallback
+                        className={cn('text-[10px]', compact ? 'rounded-full' : 'rounded-[5px]')}
+                      >
                         {(activeAccount?.name || activeAccount?.email || '')
                           .split(' ')
                           .map((n: string) => n[0])
@@ -235,7 +247,7 @@ export function NavUser() {
                       </AvatarFallback>
                     </Avatar>
                   </div>
-                </div>
+                </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent
                 className="w-(--radix-dropdown-menu-trigger-width) ml-3 min-w-56 bg-white font-medium dark:bg-[#131313]"
@@ -611,7 +623,7 @@ export function NavUser() {
         )}
       </div>
 
-      {state !== 'collapsed' && (
+      {!compact && state !== 'collapsed' && (
         <div className="mt-2 flex items-center justify-between gap-2">
           <div className="mt-[2px] flex flex-col items-start gap-1 space-y-1">
             <div className="flex items-center gap-1 text-[13px] leading-none text-black dark:text-white">
