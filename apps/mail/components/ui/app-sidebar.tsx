@@ -10,7 +10,7 @@ import { navigationConfig, bottomNavItems } from '@/config/navigation';
 import { useTRPC } from '@/providers/query-provider';
 import { useSidebar } from '@/components/ui/sidebar';
 import { CreateEmail } from '../create/create-email';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { PencilCompose } from '../icons/icons';
 import { useIsMobile } from '@/hooks/use-mobile';
 import React, { useEffect, useMemo, useState } from 'react';
@@ -30,11 +30,11 @@ import { toast } from 'sonner';
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const trpc = useTRPC();
+  const queryClient = useQueryClient();
   //   const { mutateAsync: createMeet } = useMutation(trpc.meet.create.mutationOptions());
   const { isFullScreen } = useAIFullScreen();
   const { data: stats } = useStats();
-  const settingsQuery = useSettings();
-  const { data: settings } = settingsQuery;
+  const { data: settings } = useSettings();
   const location = useLocation();
   const { data: session } = useSession();
   const [hiddenSidebarItems, setHiddenSidebarItems] = useState<string[]>([]);
@@ -63,7 +63,11 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     setHiddenSidebarItems(next);
     try {
       await saveUserSettings({ hiddenSidebarItems: next });
-      void settingsQuery.refetch();
+      queryClient.setQueryData(trpc.settings.get.queryKey(), (current) =>
+        current
+          ? { ...current, settings: { ...current.settings, hiddenSidebarItems: next } }
+          : current,
+      );
     } catch (error) {
       setHiddenSidebarItems(previous);
       console.error('Failed to update sidebar visibility:', error);
