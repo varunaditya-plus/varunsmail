@@ -5,6 +5,7 @@ export function useEmailAliases(connectionId?: string | null) {
   const trpc = useTRPC();
   const emailAliasesQuery = useQuery(
     trpc.mail.getEmailAliases.queryOptions({ connectionId: connectionId ?? undefined }, {
+      enabled: connectionId !== null,
       initialData: [] as { email: string; name: string; primary?: boolean }[],
     }),
   );

@@ -3,6 +3,7 @@ import { useInfiniteQuery, useQuery, useMutation } from '@tanstack/react-query';
 import type { IGetThreadResponse } from '../../server/src/lib/driver/types';
 import { useSearchValue } from '@/hooks/use-search-value';
 import { isSharedGmailLabel, threadKey } from '@/lib/thread-ref';
+import { useAliasMailbox } from '@/hooks/use-alias-mailbox';
 import { useConnections } from '@/hooks/use-connections';
 import { useTRPC } from '@/providers/query-provider';
 import useSearchLabels from './use-labels-search';
@@ -21,6 +22,11 @@ export const useThreads = () => {
   const isInQueue = useAtomValue(isThreadInBackgroundQueueAtom);
   const trpc = useTRPC();
   const { labels } = useSearchLabels();
+  const {
+    mailbox: aliasMailbox,
+    isActive: isAliasMailboxActive,
+    isResolving: isAliasMailboxResolving,
+  } = useAliasMailbox();
   const [accountFilter] = useQueryState('accounts');
   const { data: connectionsData } = useConnections();
   const isUnifiedInbox = folder === 'unified';
@@ -36,6 +42,7 @@ export const useThreads = () => {
   );
   const connectionIds = accountFilter?.split(',').filter((id) => gmailConnectionIds.has(id)) ?? [];
   const unifiedLabels = labels.filter(isSharedGmailLabel);
+  const connectionLabels = aliasMailbox ? [...new Set([...labels, aliasMailbox.labelId])] : labels;
 
   const unifiedQuery = useInfiniteQuery(
     trpc.mail.listUnifiedThreads.infiniteQueryOptions(
@@ -61,10 +68,15 @@ export const useThreads = () => {
       {
         q: searchValue.value,
         folder,
-        labelIds: labels,
+        labelIds: connectionLabels,
+        connectionId: isAliasMailboxActive ? aliasMailbox?.sourceConnectionId : undefined,
       },
       {
-        enabled: !isUnifiedInbox && !isWorkflowView,
+        enabled:
+          !isUnifiedInbox &&
+          !isWorkflowView &&
+          !isAliasMailboxResolving &&
+          (!isAliasMailboxActive || !!aliasMailbox),
         initialCursor: '',
         getNextPageParam: (lastPage) => lastPage?.nextPageToken ?? null,
         staleTime: 60 * 1000 * 1, // 1 minute

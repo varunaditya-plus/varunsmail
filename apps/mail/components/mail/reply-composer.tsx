@@ -2,6 +2,7 @@ import { useUndoSend } from '@/hooks/use-undo-send';
 import { constructReplyBody, constructForwardBody } from '@/lib/utils';
 import { useActiveConnection, useConnections } from '@/hooks/use-connections';
 import { useEmailAliases } from '@/hooks/use-email-aliases';
+import { useAliasMailbox } from '@/hooks/use-alias-mailbox';
 import { EmailComposer } from '../create/email-composer';
 import { useHotkeysContext } from 'react-hotkeys-hook';
 import { useTRPC } from '@/providers/query-provider';
@@ -26,19 +27,23 @@ export default function ReplyCompose({ messageId }: ReplyComposeProps) {
   const [mode, setMode] = useQueryState('mode');
   const { enableScope, disableScope } = useHotkeysContext();
   const [connectionId] = useQueryState('connectionId');
-  const { data: aliases } = useEmailAliases(connectionId);
+  const { mailbox: aliasMailbox, isActive: isAliasMailboxActive } = useAliasMailbox();
+  const replyConnectionId = isAliasMailboxActive
+    ? (aliasMailbox?.sourceConnectionId ?? null)
+    : connectionId;
+  const { data: aliases } = useEmailAliases(replyConnectionId);
 
   const [draftId, setDraftId] = useQueryState('draftId');
   const [threadId] = useQueryState('threadId');
   const [, setActiveReplyId] = useQueryState('activeReplyId');
-  const { data: emailData, refetch, latestDraft } = useThread(threadId, connectionId);
-  const { data: draft } = useDraft(draftId ?? null, connectionId);
+  const { data: emailData, refetch, latestDraft } = useThread(threadId, replyConnectionId);
+  const { data: draft } = useDraft(draftId ?? null, replyConnectionId);
   const trpc = useTRPC();
   const { mutateAsync: sendEmail } = useMutation(trpc.mail.send.mutationOptions());
   const { data: activeConnection } = useActiveConnection();
   const { data: connectionData } = useConnections();
   const replyConnection =
-    connectionData?.connections.find((connection) => connection.id === connectionId) ??
+    connectionData?.connections.find((connection) => connection.id === replyConnectionId) ??
     activeConnection;
   const { data: settings, isLoading: settingsLoading } = useSettings();
   const { data: session } = useSession();
@@ -270,6 +275,7 @@ export default function ReplyCompose({ messageId }: ReplyComposeProps) {
     <div className="w-full rounded-2xl overflow-visible border">
       <EmailComposer
         connectionId={replyConnection?.id}
+        preferredFromEmail={isAliasMailboxActive ? aliasMailbox?.email : undefined}
         editorClassName="min-h-[50px]"
         className="w-full max-w-none! pb-1 overflow-visible"
         onSendEmail={handleSendEmail}

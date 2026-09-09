@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useActiveConnection, useConnections } from '@/hooks/use-connections';
+import { useAliasMailbox } from '@/hooks/use-alias-mailbox';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -98,6 +99,7 @@ export function NavUser() {
   const pathname = useLocation().pathname;
   const queryClient = useQueryClient();
   const { data: activeConnection, refetch: refetchActiveConnection } = useActiveConnection();
+  const { mailbox: aliasMailbox, isActive: isAliasMailboxActive } = useAliasMailbox();
   const [category] = useQueryState('category', { defaultValue: 'All Mail' });
   const { setLoading } = useLoading();
   const [{ isSyncing, syncingFolders, storageSize, shards }] = useDoState();
@@ -120,19 +122,36 @@ export function NavUser() {
     toast.success('Connection ID copied to clipboard');
   }, [activeConnection]);
 
-  const { data: activeAccount } = useActiveConnection();
-
   useEffect(() => setIsRendered(true), []);
 
-  const handleAccountSwitch = (connectionId: string) => async () => {
-    if (connectionId === activeConnection?.id) return;
+  const mailboxAccounts = useMemo(
+    () => [...(data?.connections ?? []), ...(aliasMailbox ? [aliasMailbox] : [])],
+    [data?.connections, aliasMailbox],
+  );
+  const activeAccount = isAliasMailboxActive && aliasMailbox ? aliasMailbox : activeConnection;
+  const otherConnections = useMemo(
+    () => mailboxAccounts.filter((connection) => connection.id !== activeAccount?.id),
+    [mailboxAccounts, activeAccount?.id],
+  );
+
+  const handleAccountSwitch = (account: (typeof mailboxAccounts)[number]) => async () => {
+    if (account.id === activeAccount?.id) return;
+
+    const isAliasAccount = 'sourceConnectionId' in account;
+    const connectionId = isAliasAccount ? account.sourceConnectionId : account.id;
 
     try {
       setLoading(true, m['common.navUser.switchingAccounts']());
       setThreadId(null);
-      await setDefaultConnection({ connectionId });
+      if (connectionId !== activeConnection?.id) await setDefaultConnection({ connectionId });
       queryClient.clear();
-      await queryClient.refetchQueries({ queryKey: trpc.mail.listThreads.infiniteQueryKey() });
+      if (isAliasAccount) {
+        window.location.href = `/mail/inbox?mailbox=${encodeURIComponent(account.viewId)}`;
+      } else if (isAliasMailboxActive) {
+        window.location.href = pathname;
+      } else {
+        await queryClient.refetchQueries({ queryKey: trpc.mail.listThreads.infiniteQueryKey() });
+      }
     } catch (error) {
       console.error('Error switching accounts:', error);
       toast.error(m['common.navUser.failedToSwitchAccount']());
@@ -154,11 +173,6 @@ export function NavUser() {
       },
     });
   };
-
-  const otherConnections = useMemo(() => {
-    if (!data || !activeAccount) return [];
-    return data.connections.filter((connection) => connection.id !== activeAccount?.id);
-  }, [data, activeAccount]);
 
   const handleThemeToggle = () => {
     setTheme(theme === 'dark' ? 'light' : 'dark');
@@ -240,12 +254,12 @@ export function NavUser() {
                       {m['common.navUser.accounts']()}
                     </p>
 
-                    {data?.connections
-                      ?.filter((connection) => connection.id !== activeConnection?.id)
+                    {mailboxAccounts
+                      .filter((connection) => connection.id !== activeAccount?.id)
                       .map((connection) => (
                         <DropdownMenuItem
                           key={connection.id}
-                          onClick={handleAccountSwitch(connection.id)}
+                          onClick={handleAccountSwitch(connection)}
                           className="flex cursor-pointer items-center gap-3 py-1"
                         >
                           <Avatar className="size-7 rounded-lg">
@@ -357,9 +371,9 @@ export function NavUser() {
               {data && activeAccount ? (
                 <div
                   key={activeAccount.id}
-                  onClick={handleAccountSwitch(activeAccount.id)}
+                  onClick={handleAccountSwitch(activeAccount)}
                   className={`flex cursor-pointer items-center ${
-                    activeAccount.id === activeConnection?.id && data.connections.length > 1
+                    mailboxAccounts.length > 1
                       ? 'outline-mainBlue rounded-[5px] outline outline-2'
                       : ''
                   }`}
@@ -380,7 +394,7 @@ export function NavUser() {
                           .slice(0, 2)}
                       </AvatarFallback>
                     </Avatar>
-                    {activeAccount.id === activeConnection?.id && data.connections.length > 1 && (
+                    {mailboxAccounts.length > 1 && (
                       <CircleCheck className="fill-mainBlue absolute -bottom-2 -right-2 size-4 rounded-full bg-white dark:bg-[#141414]" />
                     )}
                   </div>
@@ -396,9 +410,9 @@ export function NavUser() {
                 <Tooltip key={connection.id}>
                   <TooltipTrigger asChild>
                     <div
-                      onClick={handleAccountSwitch(connection.id)}
+                      onClick={handleAccountSwitch(connection)}
                       className={`flex cursor-pointer items-center ${
-                        connection.id === activeConnection?.id && otherConnections.length > 1
+                        connection.id === activeAccount?.id && otherConnections.length > 1
                           ? 'outline-mainBlue rounded-[5px] outline outline-2'
                           : ''
                       }`}
@@ -419,7 +433,7 @@ export function NavUser() {
                               .slice(0, 2)}
                           </AvatarFallback>
                         </Avatar>
-                        {connection.id === activeConnection?.id && otherConnections.length > 1 && (
+                        {connection.id === activeAccount?.id && otherConnections.length > 1 && (
                           <CircleCheck className="fill-mainBlue absolute -bottom-2 -right-2 size-4 rounded-full bg-white dark:bg-black" />
                         )}
                       </div>
@@ -447,7 +461,7 @@ export function NavUser() {
                     {otherConnections.slice(3).map((connection) => (
                       <DropdownMenuItem
                         key={connection.id}
-                        onClick={handleAccountSwitch(connection.id)}
+                        onClick={handleAccountSwitch(connection)}
                         className="flex cursor-pointer items-center gap-3 py-1"
                       >
                         <Avatar className="size-7 rounded-lg">

@@ -63,6 +63,7 @@ type ThreadContent = {
 
 interface EmailComposerProps {
   connectionId?: string;
+  preferredFromEmail?: string;
   initialTo?: string[];
   initialCc?: string[];
   initialBcc?: string[];
@@ -104,6 +105,7 @@ const schema = z.object({
 
 export function EmailComposer({
   connectionId,
+  preferredFromEmail,
   initialTo = [],
   initialCc = [],
   initialBcc = [],
@@ -241,6 +243,7 @@ export function EmailComposer({
       message: initialMessage,
       attachments: initialAttachments,
       fromEmail:
+        aliases?.find((alias) => alias.email === preferredFromEmail)?.email ||
         aliases?.find((alias) => alias.email === composerConnection?.email)?.email ||
         aliases?.find((alias) => alias.email === settings?.settings?.defaultEmailAlias)?.email ||
         aliases?.find((alias) => alias.primary)?.email ||
@@ -594,6 +597,7 @@ export function EmailComposer({
   // keep fromEmail in sync when settings or aliases load afterwards
   useEffect(() => {
     const preferred =
+      aliases?.find((alias) => alias.email === preferredFromEmail)?.email ??
       aliases?.find((alias) => alias.email === composerConnection?.email)?.email ??
       aliases?.find((alias) => alias.email === settings?.settings?.defaultEmailAlias)?.email ??
       aliases?.find((a) => a.primary)?.email ??
@@ -602,7 +606,14 @@ export function EmailComposer({
     if (preferred && getValues('fromEmail') !== preferred) {
       setValue('fromEmail', preferred, { shouldDirty: false });
     }
-  }, [composerConnection?.email, settings?.settings?.defaultEmailAlias, aliases, getValues, setValue]);
+  }, [
+    preferredFromEmail,
+    composerConnection?.email,
+    settings?.settings?.defaultEmailAlias,
+    aliases,
+    getValues,
+    setValue,
+  ]);
 
   const handleQualityChange = async (newQuality: ImageQuality) => {
     setImageQuality(newQuality);

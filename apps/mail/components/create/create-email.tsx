@@ -2,6 +2,7 @@ import { useUndoSend, type EmailData, deserializeFiles } from '@/hooks/use-undo-
 import { useActiveConnection } from '@/hooks/use-connections';
 import { Dialog, DialogClose } from '@/components/ui/dialog';
 import { useEmailAliases } from '@/hooks/use-email-aliases';
+import { useAliasMailbox } from '@/hooks/use-alias-mailbox';
 import { cleanEmailAddresses } from '@/lib/email-utils';
 
 import { useTRPC } from '@/providers/query-provider';
@@ -48,13 +49,19 @@ export function CreateEmail({
 }) {
   const { data: session } = useSession();
 
-  const { data: aliases } = useEmailAliases();
+  const { mailbox: aliasMailbox, isActive: isAliasMailboxActive } = useAliasMailbox();
+  const { data: aliases } = useEmailAliases(
+    isAliasMailboxActive ? (aliasMailbox?.sourceConnectionId ?? null) : undefined,
+  );
   const [draftId, setDraftId] = useQueryState('draftId');
   const {
     data: draft,
     isLoading: isDraftLoading,
     error: draftError,
-  } = useDraft(draftId ?? propDraftId ?? null);
+  } = useDraft(
+    draftId ?? propDraftId ?? null,
+    isAliasMailboxActive ? aliasMailbox?.sourceConnectionId : undefined,
+  );
 
   const [, setIsDraftFailed] = useState(false);
   const trpc = useTRPC();
@@ -102,6 +109,7 @@ export function CreateEmail({
       fromEmail: userName.trim() ? `${userName.replace(/[<>]/g, '')} <${fromEmail}>` : fromEmail,
       draftId: data.draftId ?? draftId ?? undefined,
       scheduleAt: data.scheduleAt,
+      connectionId: isAliasMailboxActive ? aliasMailbox?.sourceConnectionId : undefined,
     });
 
     setDraftId(null);
@@ -223,7 +231,9 @@ export function CreateEmail({
             </div>
           ) : (
             <EmailComposer
-              key={typedDraft?.id || undoEmailData?.to?.join(',') || 'composer'}
+              key={typedDraft?.id || undoEmailData?.to?.join(',') || aliasMailbox?.id || 'composer'}
+              connectionId={isAliasMailboxActive ? aliasMailbox?.sourceConnectionId : undefined}
+              preferredFromEmail={isAliasMailboxActive ? aliasMailbox?.email : undefined}
               className="mb-12 rounded-2xl border"
               onSendEmail={handleSendEmail}
               initialMessage={

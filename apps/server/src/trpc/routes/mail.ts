@@ -179,7 +179,7 @@ export const mailRouter = router({
         partialFailures,
       };
     }),
-  listThreads: activeDriverProcedure
+  listThreads: privateProcedure
     .input(
       z.object({
         folder: z.string().optional().default('inbox'),
@@ -187,26 +187,30 @@ export const mailRouter = router({
         maxResults: z.number().int().min(1).max(500).optional().default(defaultPageSize),
         cursor: z.string().optional().default(''),
         labelIds: z.array(z.string()).optional().default([]),
+        connectionId: z.string().optional(),
       }),
     )
     .output(IGetThreadsResponseSchema)
     .query(async ({ ctx, input }) => {
-      const { folder, maxResults, cursor, q, labelIds } = input;
-      const { activeConnection } = ctx;
+      const { folder, maxResults, cursor, q, labelIds, connectionId } = input;
+      const mailbox = await getOwnedConnection(ctx.sessionUser.id, connectionId);
       const executionCtx = getContext<HonoContext>().executionCtx;
-      const { stub: agent } = await getZeroAgent(activeConnection.id, executionCtx);
+      const { stub: agent } = await getZeroAgent(mailbox.id, executionCtx);
 
       console.debug('[listThreads] input:', { folder, maxResults, cursor, q, labelIds });
 
       if (folder === FOLDERS.DRAFT) {
         console.debug('[listThreads] Listing drafts');
-        const drafts = await agent.listDrafts({
+        const drafts: IGetThreadsResponse = await agent.listDrafts({
           q,
           maxResults,
           pageToken: cursor,
         });
         console.debug('[listThreads] Drafts result:', drafts);
-        return drafts;
+        return {
+          ...drafts,
+          threads: drafts.threads.map((thread) => ({ ...thread, connectionId: mailbox.id })),
+        };
       }
 
       type ThreadItem = { id: string; historyId: string | null; $raw?: unknown };
@@ -215,7 +219,7 @@ export const mailRouter = router({
         { folder, q, cursor, maxResults, labelIds },
         {
           live: (params) => agent.rawListThreads(params),
-          cache: (params) => getThreadsFromDB(activeConnection.id, params),
+          cache: (params) => getThreadsFromDB(mailbox.id, params),
         },
       );
 
@@ -227,7 +231,7 @@ export const mailRouter = router({
 
         await Promise.all(
           threadsResponse.threads.map(async (t: ThreadItem) => {
-            const keyName = `${t.id}__${activeConnection.id}`;
+            const keyName = `${t.id}__${mailbox.id}`;
             try {
               const wakeAtIso = await env.snoozed_emails.get(keyName);
               if (!wakeAtIso) {
@@ -246,7 +250,7 @@ export const mailRouter = router({
                 now: new Date(nowTs).toISOString(),
               });
 
-              await modifyThreadLabelsInDB(activeConnection.id, t.id, ['INBOX'], ['SNOOZED']);
+              await modifyThreadLabelsInDB(mailbox.id, t.id, ['INBOX'], ['SNOOZED']);
               await env.snoozed_emails.delete(keyName);
             } catch (error) {
               console.error('[UNSNOOZE_ON_ACCESS] Failed for', t.id, error);
@@ -260,7 +264,10 @@ export const mailRouter = router({
       }
 
       console.debug('[listThreads] Returning threadsResponse:', threadsResponse);
-      return threadsResponse;
+      return {
+        ...threadsResponse,
+        threads: threadsResponse.threads.map((thread) => ({ ...thread, connectionId: mailbox.id })),
+      };
     }),
   markAsRead: privateProcedure
     .input(threadIdsSchema)

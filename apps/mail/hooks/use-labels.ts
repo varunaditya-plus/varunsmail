@@ -12,10 +12,11 @@ const desiredSystemLabels = new Set([
   'UNREAD',
 ]);
 
-export function useLabels(connectionId?: string) {
+export function useLabels(connectionId?: string, enabled = true) {
   const trpc = useTRPC();
   const labelQuery = useQuery(
     trpc.labels.list.queryOptions(connectionId ? { connectionId } : undefined, {
+      enabled,
       staleTime: 1000 * 60 * 60, // 1 hour
     }),
   );
