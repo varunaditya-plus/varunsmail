@@ -15,9 +15,10 @@ import {
 } from '@/components/ui/select';
 
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
-import { Check, Command, Loader, Paperclip, Plus, Type, X as XIcon } from 'lucide-react';
+import { Check, Command, Loader, Maximize2, Minimize2, Minus, Paperclip, Plus, Type, X as XIcon } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { TextEffect } from '@/components/motion-primitives/text-effect';
+import type { ComposeWindowControls } from './compose-window';
 import { ScheduleSendPicker } from './schedule-send-picker';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useActiveConnection, useConnections } from '@/hooks/use-connections';
@@ -86,6 +87,7 @@ interface EmailComposerProps {
   autofocus?: boolean;
   settingsLoading?: boolean;
   editorClassName?: string;
+  floatingWindow?: ComposeWindowControls;
 }
 
 
@@ -117,6 +119,7 @@ export function EmailComposer({
   autofocus = false,
   settingsLoading = false,
   editorClassName,
+  floatingWindow,
 }: EmailComposerProps) {
   const { data: aliases } = useEmailAliases(connectionId);
   const { data: activeConnection } = useActiveConnection();
@@ -132,6 +135,7 @@ export function EmailComposer({
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [messageLength, setMessageLength] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const closeRef = useRef<() => void>(() => undefined);
   const [threadId] = useQueryState('threadId');
   const [isComposeOpen, setIsComposeOpen] = useQueryState('isComposeOpen');
   const { data: emailData } = useThread(threadId ?? null, connectionId);
@@ -139,7 +143,6 @@ export function EmailComposer({
   const [aiGeneratedMessage, setAiGeneratedMessage] = useState<string | null>(null);
   const [aiIsLoading, setAiIsLoading] = useState(false);
   const [isGeneratingSubject, setIsGeneratingSubject] = useState(false);
-  const [showLeaveConfirmation, setShowLeaveConfirmation] = useState(false);
   const [scheduleAt, setScheduleAt] = useState<string>();
   const [isScheduleValid, setIsScheduleValid] = useState<boolean>(true);
   const [showAttachmentWarning, setShowAttachmentWarning] = useState(false);
@@ -325,25 +328,6 @@ export function EmailComposer({
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [editor]);
 
-  // Perhaps add `hasUnsavedChanges` to the condition
-  useEffect(() => {
-    if (!editor) return;
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        const hasContent = editor?.getText()?.trim().length > 0;
-        if (hasContent && !draftId) {
-          e.preventDefault();
-          e.stopPropagation();
-          setShowLeaveConfirmation(true);
-        }
-      }
-    };
-
-    document.addEventListener('keydown', handleKeyDown, true); // Use capture phase
-    return () => document.removeEventListener('keydown', handleKeyDown, true);
-  }, [editor, draftId]);
-
   const proceedWithSend = async () => {
     try {
       if (isLoading || isSavingDraft) return;
@@ -365,6 +349,7 @@ export function EmailComposer({
       setAiGeneratedMessage(null);
       // Save draft before sending, we want to send drafts instead of sending new emails
       const effectiveDraftId = hasUnsavedChanges ? await saveDraft() : draftId ?? undefined;
+      if (effectiveDraftId === null) return;
 
       await onSendEmail({
         to: values.to,
@@ -453,18 +438,25 @@ export function EmailComposer({
     }
   };
 
-  const saveDraft = async () => {
+  async function saveDraft(force = false) {
     const values = getValues();
-
-    if (!hasUnsavedChanges) return draftId ?? undefined;
     const messageText = editor.getText();
+    const hasContent =
+      values.to.length > 0 ||
+      !!values.cc?.length ||
+      !!values.bcc?.length ||
+      !!values.subject.trim() ||
+      !!messageText.trim() ||
+      !!values.attachments?.length;
 
-    if (messageText.trim() === initialMessage.trim()) return draftId ?? undefined;
-    if (editor.getHTML() === initialMessage.trim()) return draftId ?? undefined;
-    if (!values.to.length || !values.subject.length || !messageText.length) {
+    if (!hasContent || (!force && !hasUnsavedChanges)) return draftId ?? undefined;
+    if (
+      !force &&
+      messageText.trim() === initialMessage.trim() &&
+      editor.getHTML() === initialMessage.trim()
+    ) {
       return draftId ?? undefined;
     }
-    if (aiGeneratedMessage || aiIsLoading || isGeneratingSubject) return draftId ?? undefined;
 
     try {
       setIsSavingDraft(true);
@@ -486,17 +478,16 @@ export function EmailComposer({
       if (response?.id && response.id !== draftId) {
         setDraftId(response.id);
       }
+      setHasUnsavedChanges(false);
       return response?.id ?? draftId ?? undefined;
     } catch (error) {
       console.error('Error saving draft:', error);
       toast.error('Failed to save draft');
-      setIsSavingDraft(false);
-      setHasUnsavedChanges(false);
+      return null;
     } finally {
       setIsSavingDraft(false);
-      setHasUnsavedChanges(false);
     }
-  };
+  }
 
   const handleGenerateSubject = async () => {
     try {
@@ -519,36 +510,33 @@ export function EmailComposer({
     }
   };
 
-  const handleClose = () => {
-    const hasContent = editor?.getText()?.trim().length > 0;
-    if (hasContent) {
-      setShowLeaveConfirmation(true);
-    } else {
-      onClose?.();
-    }
-  };
-
-  const confirmLeave = () => {
-    setShowLeaveConfirmation(false);
+  async function handleClose() {
+    if (isSavingDraft) return;
+    const values = getValues();
+    const hasContent =
+      values.to.length > 0 ||
+      !!values.cc?.length ||
+      !!values.bcc?.length ||
+      !!values.subject.trim() ||
+      !!editor.getText().trim() ||
+      !!values.attachments?.length;
+    if (hasContent && (await saveDraft(true)) === null) return;
     onClose?.();
-  };
+  }
 
-  const cancelLeave = () => {
-    setShowLeaveConfirmation(false);
-  };
+  closeRef.current = () => void handleClose();
 
-  // Component unmount protection
   useEffect(() => {
-    return () => {
-      // This cleanup runs when component is about to unmount
-      const hasContent = editor?.getText()?.trim().length > 0;
-      if (hasContent && !showLeaveConfirmation) {
-        // If we have content and haven't shown confirmation, it means
-        // the component is being unmounted unexpectedly
-        console.warn('Email composer unmounting with unsaved content');
-      }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || !floatingWindow) return;
+      event.preventDefault();
+      event.stopPropagation();
+      closeRef.current();
     };
-  }, [editor, showLeaveConfirmation]);
+
+    document.addEventListener('keydown', handleKeyDown, true);
+    return () => document.removeEventListener('keydown', handleKeyDown, true);
+  }, [floatingWindow]);
 
   useEffect(() => {
     if (!hasUnsavedChanges) return;
@@ -640,11 +628,63 @@ export function EmailComposer({
   return (
     <div
       className={cn(
-        'flex max-h-[500px] w-full max-w-[750px] flex-col overflow-hidden rounded-2xl bg-[#FAFAFA] shadow-sm dark:bg-[#202020]',
+        'flex w-full flex-col overflow-hidden bg-[#FAFAFA] dark:bg-[#202020]',
+        floatingWindow
+          ? 'h-full max-h-none max-w-none rounded-xl border shadow-xl'
+          : 'max-h-[500px] max-w-[750px] rounded-2xl shadow-sm',
         className,
       )}
     >
-      <div className="no-scrollbar dark:bg-panelDark flex min-h-0 flex-1 flex-col overflow-y-auto rounded-2xl">
+      {floatingWindow ? (
+        <div
+          className="flex h-10 shrink-0 touch-none select-none items-center gap-2 bg-[#404040] px-3 text-white dark:bg-[#303030]"
+          onPointerDown={floatingWindow.onDragStart}
+          onDoubleClick={floatingWindow.onToggleMaximize}
+          data-compose-drag-handle
+        >
+          <span className="min-w-0 flex-1 truncate text-sm font-medium">
+            {subjectInput.trim() || 'New Message'}
+          </span>
+          <div className="flex items-center gap-0.5" onPointerDown={(event) => event.stopPropagation()}>
+            <button
+              type="button"
+              className="flex h-7 w-7 items-center justify-center rounded hover:bg-white/15"
+              onClick={floatingWindow.isMinimized ? floatingWindow.onRestore : floatingWindow.onMinimize}
+              aria-label={floatingWindow.isMinimized ? 'Restore compose' : 'Minimize compose'}
+            >
+              <Minus className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              className="flex h-7 w-7 items-center justify-center rounded hover:bg-white/15"
+              onClick={floatingWindow.onToggleMaximize}
+              aria-label={floatingWindow.isMaximized ? 'Restore compose size' : 'Maximize compose'}
+            >
+              {floatingWindow.isMaximized ? (
+                <Minimize2 className="h-3.5 w-3.5" />
+              ) : (
+                <Maximize2 className="h-3.5 w-3.5" />
+              )}
+            </button>
+            <button
+              type="button"
+              className="flex h-7 w-7 items-center justify-center rounded hover:bg-white/15 disabled:opacity-50"
+              onClick={() => void handleClose()}
+              disabled={isSavingDraft}
+              aria-label={isSavingDraft ? 'Saving draft' : 'Close compose'}
+            >
+              <XIcon className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      <div
+        className={cn(
+          'no-scrollbar dark:bg-panelDark flex min-h-0 flex-1 flex-col overflow-y-auto rounded-2xl',
+          floatingWindow?.isMinimized && 'hidden',
+        )}
+      >
         {/* To, Cc, Bcc */}
         <div className="shrink-0 overflow-visible border-b border-[#E7E7E7] pb-2 dark:border-[#252525]">
           <div className="flex justify-between px-3 pt-3">
@@ -673,11 +713,11 @@ export function EmailComposer({
               >
                 <span>Bcc</span>
               </button>
-              {onClose && (
+              {onClose && !floatingWindow && (
                 <button
                   tabIndex={-1}
                   className="flex h-full items-center gap-2 text-sm font-medium text-[#8C8C8C] hover:text-[#A8A8A8] hover:bg-gray-50 dark:hover:bg-[#404040] transition-colors cursor-pointer rounded-sm px-1 py-0.5"
-                  onClick={handleClose}
+                  onClick={() => void handleClose()}
                 >
                   <X className="h-3.5 w-3.5 fill-[#9A9A9A]" />
                 </button>
@@ -794,7 +834,12 @@ export function EmailComposer({
       </div>
 
       {/* Bottom Actions */}
-      <div className="inline-flex w-full shrink-0 items-end justify-between self-stretch rounded-b-2xl bg-[#FFFFFF] px-3 py-3 outline-white/5 dark:bg-[#202020]">
+      <div
+        className={cn(
+          'inline-flex w-full shrink-0 items-end justify-between self-stretch rounded-b-2xl bg-[#FFFFFF] px-3 py-3 outline-white/5 dark:bg-[#202020]',
+          floatingWindow?.isMinimized && 'hidden',
+        )}
+      >
         <div className="flex flex-col items-start justify-start gap-2">
           {toggleToolbar && <Toolbar editor={editor} />}
           <div className="flex items-center justify-start gap-2">
@@ -1035,26 +1080,6 @@ export function EmailComposer({
           </div>
         </div>
       </div>
-
-      <Dialog open={showLeaveConfirmation} onOpenChange={setShowLeaveConfirmation}>
-        <DialogContent showOverlay className="z-99999 sm:max-w-[425px]">
-          <DialogHeader>
-            <DialogTitle>Discard message?</DialogTitle>
-            <DialogDescription>
-              You have unsaved changes in your email. Are you sure you want to leave? Your changes
-              will be lost.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter className="mt-2">
-            <Button variant="outline" onClick={cancelLeave} className="cursor-pointer">
-              Stay
-            </Button>
-            <Button variant="destructive" onClick={confirmLeave} className="cursor-pointer">
-              Leave
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       <Dialog open={showAttachmentWarning} onOpenChange={setShowAttachmentWarning}>
         <DialogContent showOverlay className="z-99999 sm:max-w-[425px]">

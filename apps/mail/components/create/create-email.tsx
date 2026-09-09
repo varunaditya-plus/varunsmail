@@ -1,6 +1,5 @@
 import { useUndoSend, type EmailData, deserializeFiles } from '@/hooks/use-undo-send';
 import { useActiveConnection } from '@/hooks/use-connections';
-import { Dialog, DialogClose } from '@/components/ui/dialog';
 import { useEmailAliases } from '@/hooks/use-email-aliases';
 import { useAliasMailbox } from '@/hooks/use-alias-mailbox';
 import { cleanEmailAddresses } from '@/lib/email-utils';
@@ -8,6 +7,7 @@ import { cleanEmailAddresses } from '@/lib/email-utils';
 import { useTRPC } from '@/providers/query-provider';
 import { useMutation } from '@tanstack/react-query';
 import { useSettings } from '@/hooks/use-settings';
+import { ComposeWindow } from './compose-window';
 import { EmailComposer } from './email-composer';
 import { useSession } from '@/lib/auth-client';
 import { serializeFiles } from '@/lib/schemas';
@@ -16,7 +16,6 @@ import { useEffect, useMemo, useState } from 'react';
 
 import type { Attachment } from '@/types';
 import { useQueryState } from 'nuqs';
-import { X } from '../icons/icons';
 import posthog from 'posthog-js';
 import { toast } from 'sonner';
 import './prosemirror.css';
@@ -185,14 +184,6 @@ export function CreateEmail({
   // Cast draft to our extended type that includes CC and BCC
   const typedDraft = draft as unknown as DraftType;
 
-  const handleDialogClose = (open: boolean) => {
-    setIsComposeOpen(open ? 'true' : null);
-    if (!open) {
-      setDraftId(null);
-      clearUndoData();
-    }
-  };
-
   const base64ToFile = (base64: string, filename: string, mimeType: string): File | null => {
     try {
       const byteString = atob(base64);
@@ -213,32 +204,22 @@ export function CreateEmail({
     .filter((file): file is File => file !== null);
 
   return (
-    <>
-      <Dialog open={!!isComposeOpen} onOpenChange={handleDialogClose}>
-        <div className="flex min-h-screen flex-col items-center justify-center gap-1">
-          <div className="flex w-[750px] justify-start">
-            <DialogClose asChild className="flex">
-              <button className="dark:bg-panelDark flex items-center gap-1 rounded-lg bg-[#F0F0F0] px-2 py-1 hover:bg-gray-100 dark:hover:bg-[#404040] transition-colors cursor-pointer">
-                <X className="fill-muted-foreground mt-0.5 h-3.5 w-3.5 dark:fill-[#929292]" />
-                <span className="text-muted-foreground text-sm font-medium dark:text-white">
-                  esc
-                </span>
-              </button>
-            </DialogClose>
-          </div>
-          {isDraftLoading ? (
-            <div className="flex h-[600px] w-[750px] items-center justify-center rounded-2xl border">
-              <div className="text-center">
-                <div className="mx-auto mb-4 h-6 w-6 animate-spin rounded-full border-2 border-gray-300 border-t-blue-600"></div>
-                <p>Loading draft...</p>
-              </div>
+    <ComposeWindow>
+      {(controls) =>
+        isDraftLoading ? (
+          <div className="bg-background flex h-full items-center justify-center rounded-xl border shadow-xl">
+            <div className="text-center">
+              <div className="mx-auto mb-4 h-6 w-6 animate-spin rounded-full border-2 border-gray-300 border-t-blue-600" />
+              <p>Loading draft...</p>
             </div>
-          ) : (
-            <EmailComposer
+          </div>
+        ) : (
+          <EmailComposer
               key={typedDraft?.id || undoEmailData?.to?.join(',') || aliasMailbox?.id || 'composer'}
               connectionId={isAliasMailboxActive ? aliasMailbox?.sourceConnectionId : undefined}
               preferredFromEmail={isAliasMailboxActive ? aliasMailbox?.email : undefined}
-              className="mb-12 rounded-2xl border"
+              className="h-full"
+              floatingWindow={controls}
               onSendEmail={handleSendEmail}
               initialMessage={
                 undoEmailData?.message || 
@@ -275,10 +256,9 @@ export function CreateEmail({
               }
               autofocus={false}
               settingsLoading={settingsLoading}
-            />
-          )}
-        </div>
-      </Dialog>
-    </>
+          />
+        )
+      }
+    </ComposeWindow>
   );
 }

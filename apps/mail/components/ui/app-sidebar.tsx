@@ -1,10 +1,3 @@
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogTitle,
-  DialogTrigger,
-} from '@/components/ui/dialog';
 import { Sidebar, SidebarContent, SidebarHeader } from '@/components/ui/sidebar';
 import { navigationConfig } from '@/config/navigation';
 import { useTRPC } from '@/providers/query-provider';
@@ -37,6 +30,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const { data: settings } = useSettings();
   const location = useLocation();
   const { data: session } = useSession();
+  const [composeOpen] = useQueryState('isComposeOpen');
   const [hiddenSidebarItems, setHiddenSidebarItems] = useState<string[]>([]);
   const { mutateAsync: saveUserSettings, isPending: isSavingSidebar } = useMutation(
     trpc.settings.save.mutationOptions(),
@@ -176,6 +170,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           </SidebarContent>
         </Sidebar>
       )}
+      {composeOpen === 'true' ? <CreateEmail /> : null}
     </div>
   );
 }
@@ -184,49 +179,35 @@ function ComposeButton() {
   const { state } = useSidebar();
   const isMobile = useIsMobile();
 
-  const [dialogOpen, setDialogOpen] = useQueryState('isComposeOpen');
+  const [, setComposeOpen] = useQueryState('isComposeOpen');
   const [, setDraftId] = useQueryState('draftId');
   const [, setTo] = useQueryState('to');
   const [, setActiveReplyId] = useQueryState('activeReplyId');
   const [, setMode] = useQueryState('mode');
 
-  const handleOpenChange = async (open: boolean) => {
-    if (!open) {
-      setDialogOpen(null);
-    } else {
-      setDialogOpen('true');
-    }
+  const openComposer = () => {
     setDraftId(null);
     setTo(null);
     setActiveReplyId(null);
     setMode(null);
+    setComposeOpen('true');
   };
   return (
-    <Dialog open={!!dialogOpen} onOpenChange={handleOpenChange}>
-      <DialogTitle></DialogTitle>
-      <DialogDescription></DialogDescription>
-
-      <DialogTrigger asChild>
-        <button
-          type="button"
-          className="relative mb-2 inline-flex h-14 w-full cursor-pointer items-center justify-center gap-1 self-stretch overflow-hidden rounded-2xl border-0 bg-[#006FFE] text-black shadow-sm transition-colors hover:bg-[#0056CC] dark:text-white dark:hover:bg-[#0056CC]"
-        >
-          {state === 'collapsed' && !isMobile ? (
-            <PencilCompose className="mt-0.5 fill-white text-black" />
-          ) : (
-            <div className="flex items-center justify-center gap-2.5 pl-0.5 pr-1">
-              <PencilCompose className="fill-white" />
-              <div className="justify-start text-sm leading-none text-white">
-                {m['common.commandPalette.commands.newEmail']()}
-              </div>
-            </div>
-          )}
-        </button>
-      </DialogTrigger>
-
-      <DialogContent className="h-screen w-screen max-w-none border-none bg-[#FAFAFA] p-0 shadow-none dark:bg-[#141414]">
-        <CreateEmail />
-      </DialogContent>
-    </Dialog>
+    <button
+      type="button"
+      className="relative mb-2 inline-flex h-14 w-full cursor-pointer items-center justify-center gap-1 self-stretch overflow-hidden rounded-2xl border-0 bg-[#006FFE] text-black shadow-sm transition-colors hover:bg-[#0056CC] dark:text-white dark:hover:bg-[#0056CC]"
+      onClick={openComposer}
+    >
+      {state === 'collapsed' && !isMobile ? (
+        <PencilCompose className="mt-0.5 fill-white text-black" />
+      ) : (
+        <div className="flex items-center justify-center gap-2.5 pl-0.5 pr-1">
+          <PencilCompose className="fill-white" />
+          <div className="justify-start text-sm leading-none text-white">
+            {m['common.commandPalette.commands.newEmail']()}
+          </div>
+        </div>
+      )}
+    </button>
   );
 }
