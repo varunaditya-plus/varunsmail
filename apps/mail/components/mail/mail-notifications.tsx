@@ -9,6 +9,8 @@ type NotificationThread = {
   senderEmail?: string;
   senderName?: string;
   subject?: string;
+  latestMessageId?: string;
+  receivedOn?: string;
   labels?: string[];
   hasUnread?: boolean;
 };
@@ -48,7 +50,7 @@ function saveSeenThreads(threads: Set<string>) {
 }
 
 function notificationKey(thread: NotificationThread) {
-  return `${thread.connectionId}:${thread.id}`;
+  return `${thread.connectionId}:${thread.id}:${thread.latestMessageId || thread.receivedOn || thread.id}`;
 }
 
 function matchesPrioritySender(senderEmail: string | undefined, prioritySenders: string[]) {
