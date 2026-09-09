@@ -36,6 +36,7 @@ export type SendMailboxEmailOptions = {
   connectionId: string;
   input: SendMailInput;
   waitUntil?: (promise: Promise<unknown>) => void;
+  markDeliveryAttempted?: () => void;
 };
 
 function getScheduleTarget(scheduleAt?: string, now = Date.now()) {
@@ -53,6 +54,7 @@ export async function sendMailboxEmail({
   connectionId,
   input,
   waitUntil,
+  markDeliveryAttempted,
 }: SendMailboxEmailOptions) {
   const { draftId, scheduleAt, attachments, ...mail } = input;
   const agent = await getZeroAgent(connectionId, waitUntil ? { waitUntil } : undefined);
@@ -120,6 +122,7 @@ export async function sendMailboxEmail({
 
     if (isLongTerm) {
       try {
+        markDeliveryAttempted?.();
         await scheduledKV.put(
           messageId,
           JSON.stringify({ messageId, connectionId, sendAt: targetTime }),
@@ -133,6 +136,7 @@ export async function sendMailboxEmail({
       const delaySeconds = rawDelaySeconds;
       const queueBody: IEmailSendBatch = { messageId, connectionId, sendAt: targetTime };
       try {
+        markDeliveryAttempted?.();
         await send_email_queue.send(queueBody, { delaySeconds });
       } catch (error) {
         console.error(`Failed to enqueue email send for message ${messageId}`, error);
@@ -163,6 +167,7 @@ export async function sendMailboxEmail({
 
   let result;
   try {
+    markDeliveryAttempted?.();
     result = draftId
       ? await agent.stub.sendDraft(draftId, mailWithAttachments)
       : await agent.stub.create(mailWithAttachments);

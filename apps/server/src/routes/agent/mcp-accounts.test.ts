@@ -2,8 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import {
   type McpConnection,
+  getDefaultConnectionAfterDisconnect,
+  isMcpSendAsAllowed,
   listMcpMailboxAccounts,
+  mcpDraftMatchesAccount,
   resolveMcpMailboxAccount,
+  scopeMcpDraftQuery,
 } from './mcp-accounts';
 
 const connections: McpConnection[] = [
@@ -60,5 +64,44 @@ describe('MCP mailbox accounts', () => {
     expect(() => resolveMcpMailboxAccount(connections, 'primary', 'someone-else')).toThrow(
       'Mailbox account not found',
     );
+  });
+
+  it('keeps or chooses a valid physical default after disconnecting', () => {
+    expect(getDefaultConnectionAfterDisconnect(connections, 'second', 'primary')).toBe('second');
+    expect(getDefaultConnectionAfterDisconnect(connections, 'primary', 'primary')).toBe('second');
+    expect(getDefaultConnectionAfterDisconnect(connections, null, 'second')).toBe('primary');
+  });
+
+  it('scopes alias drafts by From and rejects source-account drafts', () => {
+    const alias = listMcpMailboxAccounts(connections, 'primary').at(-1)!;
+    const aliasDraft = {
+      rawMessage: {
+        payload: {
+          headers: [{ name: 'From', value: 'Barcelona <varun@barcelonahackathon.com>' }],
+        },
+      },
+    };
+    const primaryDraft = {
+      rawMessage: {
+        payload: { headers: [{ name: 'from', value: 'varunaditya.aga@gmail.com' }] },
+      },
+    };
+
+    expect(scopeMcpDraftQuery('subject:test', alias)).toBe(
+      'subject:test from:varun@barcelonahackathon.com',
+    );
+    expect(mcpDraftMatchesAccount(aliasDraft, alias)).toBe(true);
+    expect(mcpDraftMatchesAccount(primaryDraft, alias)).toBe(false);
+    expect(mcpDraftMatchesAccount({}, alias)).toBe(false);
+  });
+
+  it('validates display-name From values against provider send-as aliases', () => {
+    const aliases = [
+      { email: 'varunaditya.aga@gmail.com' },
+      { email: 'varun@barcelonahackathon.com' },
+    ];
+
+    expect(isMcpSendAsAllowed(aliases, 'Varun <varun@barcelonahackathon.com>')).toBe(true);
+    expect(isMcpSendAsAllowed(aliases, 'spoof@example.com')).toBe(false);
   });
 });

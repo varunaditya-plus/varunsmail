@@ -79,4 +79,53 @@ describe('send result', () => {
       }),
     ).resolves.toEqual({ success: true, messageId: 'message-1', threadId: 'thread-1' });
   });
+
+  it('marks delivery attempted immediately before calling the provider', async () => {
+    const events: string[] = [];
+    const markDeliveryAttempted = vi.fn(() => events.push('marked'));
+    mocks.create.mockImplementation(async () => {
+      events.push('provider');
+      return { id: 'message-1' };
+    });
+
+    await sendMailboxEmail({
+      env: {} as ZeroEnv,
+      userId: 'user-1',
+      connectionId: 'connection-1',
+      input: {
+        to: [{ email: 'recipient@example.com' }],
+        subject: 'Subject',
+        message: '<p>Message</p>',
+        attachments: [],
+        headers: {},
+      },
+      markDeliveryAttempted,
+    });
+
+    expect(markDeliveryAttempted).toHaveBeenCalledOnce();
+    expect(events).toEqual(['marked', 'provider']);
+  });
+
+  it('leaves a pre-accept scheduling failure retryable', async () => {
+    mocks.findUserSettings.mockResolvedValue({ settings: { undoSendEnabled: true } });
+    mocks.writeOutboxState.mockRejectedValue(new Error('KV unavailable'));
+    const markDeliveryAttempted = vi.fn();
+
+    await expect(
+      sendMailboxEmail({
+        env: { pending_emails_status: {} } as ZeroEnv,
+        userId: 'user-1',
+        connectionId: 'connection-1',
+        input: {
+          to: [{ email: 'recipient@example.com' }],
+          subject: 'Subject',
+          message: '<p>Message</p>',
+          attachments: [],
+          headers: {},
+        },
+        markDeliveryAttempted,
+      }),
+    ).resolves.toMatchObject({ success: false });
+    expect(markDeliveryAttempted).not.toHaveBeenCalled();
+  });
 });

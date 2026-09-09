@@ -22,6 +22,14 @@ export type McpMailboxAccount = {
   labelName?: string;
 };
 
+type GmailDraft = {
+  rawMessage?: {
+    payload?: {
+      headers?: Array<{ name?: string | null; value?: string | null }>;
+    } | null;
+  } | null;
+};
+
 const aliases = [
   {
     id: 'alias:barcelonahackathon',
@@ -88,4 +96,33 @@ export function resolveMcpMailboxAccount(
 
   if (!account) throw new Error(selector ? 'Mailbox account not found' : 'Connect a mailbox first');
   return account;
+}
+
+export function getDefaultConnectionAfterDisconnect(
+  connections: McpConnection[],
+  defaultConnectionId: string | null | undefined,
+  disconnectedConnectionId: string,
+) {
+  const remaining = connections.filter(({ id }) => id !== disconnectedConnectionId);
+  return remaining.find(({ id }) => id === defaultConnectionId)?.id ?? remaining[0]?.id ?? null;
+}
+
+export function scopeMcpDraftQuery(query: string | undefined, account: McpMailboxAccount) {
+  return [query?.trim(), account.fromEmail ? `from:${account.fromEmail}` : '']
+    .filter(Boolean)
+    .join(' ');
+}
+
+export function isMcpSendAsAllowed(aliases: Array<{ email: string }>, fromEmail: string) {
+  const normalize = (value: string) =>
+    (value.match(/<([^>]+)>/)?.[1] ?? value).trim().toLowerCase();
+  return aliases.some(({ email }) => normalize(email) === normalize(fromEmail));
+}
+
+export function mcpDraftMatchesAccount(draft: unknown, account: McpMailboxAccount) {
+  if (!account.fromEmail) return true;
+  const headers = (draft as GmailDraft | null)?.rawMessage?.payload?.headers ?? [];
+  const from = headers.find(({ name }) => name?.toLowerCase() === 'from')?.value;
+  if (!from) return false;
+  return isMcpSendAsAllowed([{ email: from }], account.fromEmail);
 }

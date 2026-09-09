@@ -19,10 +19,15 @@ import z from 'zod';
 
 import {
   type McpMailboxAccount,
+  getDefaultConnectionAfterDisconnect,
+  isMcpSendAsAllowed,
   listMcpMailboxAccounts,
+  mcpDraftMatchesAccount,
   resolveMcpMailboxAccount,
+  scopeMcpDraftQuery,
 } from './mcp-accounts';
 import { composeEmail, generateEmailSubjectForConnection } from '../../trpc/routes/ai/compose';
+import { createMcpIdempotencyStore, runMcpIdempotentOperation } from './mcp-idempotency';
 import { getThread, getZeroAgent, getZeroDB } from '../../lib/server-utils';
 import type { IGetThreadsResponse } from '../../lib/driver/types';
 import { getListUnsubscribeAction } from '../../lib/email-utils';
@@ -76,71 +81,6 @@ function result(value: unknown) {
     content: [{ type: 'text' as const, text }],
     structuredContent: JSON.parse(text) as { result: unknown },
   };
-}
-
-async function hashRequest(value: unknown) {
-  const bytes = new TextEncoder().encode(JSON.stringify(value));
-  const digest = await crypto.subtle.digest('SHA-256', bytes);
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
-}
-
-async function runIdempotentOperation<T>(
-  userId: string,
-  key: string,
-  operation: string,
-  input: unknown,
-  perform: () => Promise<T>,
-) {
-  const requestHash = await hashRequest(input);
-  const inserted = await env.DB.prepare(
-    `INSERT OR IGNORE INTO mail0_mcp_idempotency
-      (user_id, idempotency_key, operation, request_hash, result, created_at)
-      VALUES (?, ?, ?, ?, NULL, ?)`,
-  )
-    .bind(userId, key, operation, requestHash, Date.now())
-    .run();
-
-  if (!inserted.meta.changes) {
-    const existing = await env.DB.prepare(
-      `SELECT request_hash AS requestHash, result FROM mail0_mcp_idempotency
-       WHERE user_id = ? AND idempotency_key = ? AND operation = ?`,
-    )
-      .bind(userId, key, operation)
-      .first<{ requestHash: string; result: string | null }>();
-    if (!existing || existing.requestHash !== requestHash) {
-      throw new Error('Idempotency key was already used with a different message');
-    }
-    if (!existing.result) throw new Error('A send with this idempotency key is still in progress');
-    return JSON.parse(existing.result) as T;
-  }
-
-  try {
-    const operationResult = await perform();
-    await env.DB.prepare(
-      `UPDATE mail0_mcp_idempotency SET result = ?
-       WHERE user_id = ? AND idempotency_key = ? AND operation = ?`,
-    )
-      .bind(JSON.stringify(operationResult), userId, key, operation)
-      .run();
-    return operationResult;
-  } catch (error) {
-    await env.DB.prepare(
-      `DELETE FROM mail0_mcp_idempotency
-       WHERE user_id = ? AND idempotency_key = ? AND operation = ?`,
-    )
-      .bind(userId, key, operation)
-      .run();
-    throw error;
-  }
-}
-
-function extractEmail(value: string) {
-  return (
-    value
-      .match(/<([^>]+)>/)?.[1]
-      ?.trim()
-      .toLowerCase() ?? value.trim().toLowerCase()
-  );
 }
 
 function publicAccount(account: McpMailboxAccount) {
@@ -221,6 +161,7 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
 
     const userId = this.props.userId;
     const { db } = createDb(env.DB);
+    const idempotency = createMcpIdempotencyStore(env.DB);
     const loadAccounts = async () => {
       const [owner, connections] = await Promise.all([
         db.query.user.findFirst({ where: eq(user.id, userId) }),
@@ -304,10 +245,31 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
         const zeroDb = await getZeroDB(userId);
         if (action === 'set_default') {
           await zeroDb.updateUser({ defaultConnectionId: account.connectionId });
-          return result({ success: true, account: publicAccount(account) });
+          return result({
+            success: true,
+            account: { ...publicAccount(account), isDefault: true },
+          });
         }
+        const state = await loadAccounts();
+        const defaultConnectionId = getDefaultConnectionAfterDisconnect(
+          state.connections,
+          state.owner.defaultConnectionId,
+          account.connectionId,
+        );
         await zeroDb.deleteConnection(account.connectionId);
-        return result({ success: true, disconnected: publicAccount(account) });
+        if (state.owner.defaultConnectionId !== defaultConnectionId) {
+          await zeroDb.updateUser({ defaultConnectionId });
+        }
+        const remaining = listMcpMailboxAccounts(
+          state.connections.filter(({ id }) => id !== account.connectionId),
+          defaultConnectionId,
+        );
+        const defaultAccount = remaining.find(({ isDefault }) => isDefault);
+        return result({
+          success: true,
+          disconnected: { ...publicAccount(account), isDefault: false, isConnected: false },
+          defaultAccount: defaultAccount ? publicAccount(defaultAccount) : null,
+        });
       },
     );
 
@@ -664,32 +626,27 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
         }
 
         const requestedFrom = account.fromEmail ?? input.fromEmail ?? account.email;
-        const allowed = new Set(
-          [account.email, ...(await agent.getEmailAliases()).map(({ email }) => email)].map(
-            (email) => email.toLowerCase(),
-          ),
-        );
-        if (!allowed.has(extractEmail(requestedFrom))) {
+        if (!isMcpSendAsAllowed(await agent.getEmailAliases(), requestedFrom)) {
           throw new Error('The selected mailbox is not authorized to send from that address');
         }
 
         const mail = { ...input, fromEmail: requestedFrom };
-        const sendResult = await runIdempotentOperation(
-          userId,
-          idempotencyKey,
-          'email_send',
+        const sendResult = await runMcpIdempotentOperation(
+          idempotency,
+          { userId, idempotencyKey, operation: 'email_send' },
           {
             mailboxId: account.id,
             connectionId: account.connectionId,
             ...mail,
           },
-          () =>
+          (markDeliveryAttempted) =>
             sendMailboxEmail({
               env,
               userId,
               connectionId: account.connectionId,
               input: mail,
               waitUntil: (promise) => this.ctx.waitUntil(promise),
+              markDeliveryAttempted,
             }),
         );
         return result({ account: publicAccount(account), ...sendResult });
@@ -724,10 +681,16 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
         const agent = await getAccountAgent(account);
         if (input.action === 'list') {
           const drafts = (await agent.listDrafts({
-            q: input.query,
+            q: scopeMcpDraftQuery(input.query, account),
             maxResults: input.maxResults,
             pageToken: input.pageToken,
           })) as unknown as IGetThreadsResponse;
+          if (account.kind === 'alias') {
+            const matches = await mapInBatches(drafts.threads, 10, async (draft) =>
+              mcpDraftMatchesAccount(await agent.getDraft(draft.id), account),
+            );
+            drafts.threads = drafts.threads.filter((_, index) => matches[index]);
+          }
           return result({
             account: publicAccount(account),
             ...drafts,
@@ -735,16 +698,35 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
         }
         if (!input.id && input.action !== 'save') throw new Error('id is required');
         if (input.action === 'get') {
+          const draft = await agent.getDraft(input.id!);
+          if (!mcpDraftMatchesAccount(draft, account)) {
+            throw new Error('Draft is outside this alias mailbox');
+          }
           return result({
             account: publicAccount(account),
-            draft: await agent.getDraft(input.id!),
+            draft,
           });
         }
         if (input.action === 'delete') {
+          if (!mcpDraftMatchesAccount(await agent.getDraft(input.id!), account)) {
+            throw new Error('Draft is outside this alias mailbox');
+          }
           await agent.deleteDraft(input.id!);
           return result({ success: true, account: publicAccount(account), id: input.id });
         }
         const fromEmail = account.fromEmail ?? input.fromEmail ?? account.email;
+        const aliases = await agent.getEmailAliases();
+        if (!isMcpSendAsAllowed(aliases, fromEmail)) {
+          throw new Error('The selected mailbox is not authorized to draft from that address');
+        }
+        if (account.kind === 'alias' && input.id) {
+          if (!mcpDraftMatchesAccount(await agent.getDraft(input.id), account)) {
+            throw new Error('Draft is outside this alias mailbox');
+          }
+        }
+        if (account.kind === 'alias' && input.threadId) {
+          await loadThread(account, input.threadId);
+        }
         const draft = await agent.createDraft({
           id: input.id ?? null,
           to: input.to ?? '',
@@ -814,6 +796,7 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
           action: z.enum(['aliases', 'recipients', 'attachments', 'attachment', 'raw', 'verify']),
           account: accountSelector,
           messageId: z.string().optional(),
+          threadId: z.string().optional(),
           attachmentId: z.string().optional(),
           query: z.string().optional().default(''),
           limit: z.number().int().min(1).max(100).optional().default(10),
@@ -821,13 +804,16 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
         outputSchema,
         annotations: readOnly,
       },
-      async ({ action, account: selector, messageId, attachmentId, query, limit }) => {
+      async ({ action, account: selector, messageId, threadId, attachmentId, query, limit }) => {
         const account = await resolveConnectedAccount(selector);
         const agent = await getAccountAgent(account);
         if (action === 'aliases') {
+          const aliases = await agent.getEmailAliases();
           return result({
             account: publicAccount(account),
-            aliases: await agent.getEmailAliases(),
+            aliases: account.fromEmail
+              ? aliases.filter(({ email }) => isMcpSendAsAllowed([{ email }], account.fromEmail!))
+              : aliases,
           });
         }
         if (action === 'recipients') {
@@ -837,6 +823,13 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
           });
         }
         if (!messageId) throw new Error('messageId is required');
+        if (account.kind === 'alias') {
+          if (!threadId) throw new Error('threadId is required for an alias mailbox message');
+          const thread = await loadThread(account, threadId);
+          if (!thread.messages.some(({ id }) => id === messageId)) {
+            throw new Error('Message was not found in the selected alias mailbox thread');
+          }
+        }
         if (action === 'raw') {
           return result({
             account: publicAccount(account),
@@ -953,10 +946,13 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
         }
 
         const email = z.string().email().parse(unsubscribe.emailAddress);
-        const sendResult = await runIdempotentOperation(
-          userId,
-          `${account.id}:${providerMessageId}`,
-          'list_unsubscribe_email',
+        const sendResult = await runMcpIdempotentOperation(
+          idempotency,
+          {
+            userId,
+            idempotencyKey: `${account.id}:${providerMessageId}`,
+            operation: 'list_unsubscribe_email',
+          },
           {
             mailboxId: account.id,
             threadId,
@@ -964,7 +960,7 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
             email,
             subject: unsubscribe.subject,
           },
-          () =>
+          (markDeliveryAttempted) =>
             sendMailboxEmail({
               env,
               userId,
@@ -978,6 +974,7 @@ export class ZeroMCP extends McpAgent<typeof env, Record<string, unknown>, { use
                 fromEmail: account.fromEmail ?? account.email,
               },
               waitUntil: (promise) => this.ctx.waitUntil(promise),
+              markDeliveryAttempted,
             }),
         );
         return result({ completed: true, account: publicAccount(account), ...sendResult });
