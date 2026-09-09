@@ -97,7 +97,11 @@ export function CreateEmail({
     draftId?: string;
     scheduleAt?: string;
   }) => {
-    const fromEmail = data.fromEmail || aliases?.[0]?.email || userEmail;
+    const fromEmail =
+      data.fromEmail ||
+      (isAliasMailboxActive ? aliasMailbox?.email : undefined) ||
+      aliases?.[0]?.email ||
+      userEmail;
 
     const result = await sendEmail({
       to: data.to.map((email) => ({ email, name: email.split('@')[0] || email })),

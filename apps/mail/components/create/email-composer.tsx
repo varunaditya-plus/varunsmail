@@ -243,7 +243,7 @@ export function EmailComposer({
       message: initialMessage,
       attachments: initialAttachments,
       fromEmail:
-        aliases?.find((alias) => alias.email === preferredFromEmail)?.email ||
+        preferredFromEmail ||
         aliases?.find((alias) => alias.email === composerConnection?.email)?.email ||
         aliases?.find((alias) => alias.email === settings?.settings?.defaultEmailAlias)?.email ||
         aliases?.find((alias) => alias.primary)?.email ||
@@ -597,7 +597,7 @@ export function EmailComposer({
   // keep fromEmail in sync when settings or aliases load afterwards
   useEffect(() => {
     const preferred =
-      aliases?.find((alias) => alias.email === preferredFromEmail)?.email ??
+      preferredFromEmail ??
       aliases?.find((alias) => alias.email === composerConnection?.email)?.email ??
       aliases?.find((alias) => alias.email === settings?.settings?.defaultEmailAlias)?.email ??
       aliases?.find((a) => a.primary)?.email ??
