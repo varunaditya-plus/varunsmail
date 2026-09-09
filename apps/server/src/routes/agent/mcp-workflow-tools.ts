@@ -75,6 +75,7 @@ const userSettingsPatchSchema = z.object({
   quietHoursStart: userSettingsSchema.shape.quietHoursStart.removeDefault().optional(),
   quietHoursEnd: userSettingsSchema.shape.quietHoursEnd.removeDefault().optional(),
   notificationTimezone: userSettingsSchema.shape.notificationTimezone.optional(),
+  hiddenSidebarItems: userSettingsSchema.shape.hiddenSidebarItems.removeDefault().optional(),
 });
 
 function required<T>(value: T | null | undefined, name: string): T {
@@ -619,7 +620,7 @@ export function registerMcpWorkflowTools(server: McpServer, userId: string) {
     {
       title: 'Owner mail settings',
       description:
-        'Read or update the owner’s mail, privacy, appearance, and notification settings.',
+        'Read or update the owner’s mail, privacy, appearance, notification, and sidebar settings.',
       inputSchema: {
         action: z.enum(['get', 'save']),
         settings: userSettingsPatchSchema.optional(),

@@ -10,13 +10,14 @@ import { navigationConfig, bottomNavItems } from '@/config/navigation';
 import { useTRPC } from '@/providers/query-provider';
 import { useSidebar } from '@/components/ui/sidebar';
 import { CreateEmail } from '../create/create-email';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { PencilCompose } from '../icons/icons';
 import { useIsMobile } from '@/hooks/use-mobile';
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useSession } from '@/lib/auth-client';
 import { useAIFullScreen } from './ai-sidebar';
 import { useStats } from '@/hooks/use-stats';
+import { useSettings } from '@/hooks/use-settings';
 import { useLocation } from 'react-router';
 import { cn, FOLDERS } from '@/lib/utils';
 import { m } from '@/paraglide/messages';
@@ -25,21 +26,51 @@ import { NavUser } from './nav-user';
 import { NavMain } from './nav-main';
 import { useQueryState } from 'nuqs';
 import { FolderSearch } from 'lucide-react';
-// import { toast } from 'sonner';
+import { toast } from 'sonner';
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const trpc = useTRPC();
   //   const { mutateAsync: createMeet } = useMutation(trpc.meet.create.mutationOptions());
   const { isFullScreen } = useAIFullScreen();
   const { data: stats } = useStats();
+  const settingsQuery = useSettings();
+  const { data: settings } = settingsQuery;
   const location = useLocation();
   const { data: session } = useSession();
+  const [hiddenSidebarItems, setHiddenSidebarItems] = useState<string[]>([]);
+  const { mutateAsync: saveUserSettings, isPending: isSavingSidebar } = useMutation(
+    trpc.settings.save.mutationOptions(),
+  );
   const { data: smartFolders } = useQuery(
     trpc.mailboxWorkflows.smartFolders.list.queryOptions(void 0, {
       enabled: !!session?.user.id,
       staleTime: 60 * 1000,
     }),
   );
+
+  useEffect(() => {
+    if (settings) setHiddenSidebarItems(settings.settings.hiddenSidebarItems);
+  }, [settings]);
+
+  async function setSidebarItemVisibility(itemId: string, visible: boolean) {
+    if (!settings || isSavingSidebar) return;
+
+    const previous = hiddenSidebarItems;
+    const next = visible
+      ? previous.filter((id) => id !== itemId)
+      : [...new Set([...previous, itemId])];
+
+    setHiddenSidebarItems(next);
+    try {
+      await saveUserSettings({ hiddenSidebarItems: next });
+      void settingsQuery.refetch();
+    } catch (error) {
+      setHiddenSidebarItems(previous);
+      console.error('Failed to update sidebar visibility:', error);
+      toast.error('Failed to update sidebar');
+    }
+  }
+
   const { currentSection, navItems } = useMemo(() => {
     // Find which section we're in based on the pathname
     const section = Object.entries(navigationConfig).find(([, config]) =>
@@ -131,7 +162,12 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             className={`scrollbar scrollbar-w-1 scrollbar-thumb-accent/40 scrollbar-track-transparent hover:scrollbar-thumb-accent scrollbar-thumb-rounded-full overflow-x-hidden py-0 pt-0 ${state !== 'collapsed' ? 'mt-5 md:px-4' : 'px-2'}`}
           >
             <div className="flex-1 py-0">
-              <NavMain items={navItems} />
+              <NavMain
+                items={navItems}
+                hiddenItemIds={hiddenSidebarItems}
+                onItemVisibilityChange={setSidebarItemVisibility}
+                isVisibilitySaving={isSavingSidebar}
+              />
             </div>
           </SidebarContent>
 

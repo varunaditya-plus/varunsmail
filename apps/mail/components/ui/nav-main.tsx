@@ -2,6 +2,13 @@ import { SidebarGroup, SidebarMenu, SidebarMenuButton, SidebarMenuItem } from '.
 import { Collapsible, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useCommandPalette } from '../context/command-palette-context.jsx';
 import { LabelDialog } from '@/components/labels/label-dialog';
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { useActiveConnection } from '@/hooks/use-connections';
 import { useMutation } from '@tanstack/react-query';
 import { useSidebar } from '../context/sidebar-context';
@@ -16,7 +23,7 @@ import { useStats } from '@/hooks/use-stats';
 import SidebarLabels from './sidebar-labels';
 import { useCallback, useRef } from 'react';
 import { BASE_URL } from '@/lib/constants';
-import { Plus } from 'lucide-react';
+import { Plus, Settings } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import * as React from 'react';
@@ -39,8 +46,12 @@ interface NavMainProps {
     title: string;
     items: NavItemProps[];
     isActive?: boolean;
+    configurable?: boolean;
   }[];
   isBottomNav?: boolean;
+  hiddenItemIds?: string[];
+  onItemVisibilityChange?: (itemId: string, visible: boolean) => Promise<void>;
+  isVisibilitySaving?: boolean;
 }
 
 type IconRefType = SVGSVGElement & {
@@ -48,7 +59,13 @@ type IconRefType = SVGSVGElement & {
   stopAnimation?: () => void;
 };
 
-export function NavMain({ items, isBottomNav = false }: NavMainProps) {
+export function NavMain({
+  items,
+  isBottomNav = false,
+  hiddenItemIds = [],
+  onItemVisibilityChange,
+  isVisibilitySaving = false,
+}: NavMainProps) {
   const location = useLocation();
   const pathname = location.pathname;
   const searchParams = new URLSearchParams(location.search);
@@ -177,24 +194,63 @@ export function NavMain({ items, isBottomNav = false }: NavMainProps) {
             <SidebarMenuItem>
               {state !== 'collapsed' ? (
                 section.title ? (
-                  <p className="text-muted-foreground mx-2 mb-2 text-[13px] dark:text-[#898989]">
-                    {section.title}
-                  </p>
+                  <div className="group/section-header mx-2 mb-2 flex h-5 items-center justify-between">
+                    <p className="text-muted-foreground text-[13px] dark:text-[#898989]">
+                      {section.title}
+                    </p>
+                    {section.configurable && onItemVisibilityChange ? (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            aria-label={`Configure ${section.title}`}
+                            className="text-muted-foreground h-6 w-6 opacity-0 transition-opacity hover:bg-transparent focus-visible:opacity-100 group-hover/section-header:opacity-100 data-[state=open]:opacity-100"
+                          >
+                            <Settings className="h-3.5 w-3.5" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-52">
+                          <DropdownMenuLabel>Show in sidebar</DropdownMenuLabel>
+                          {section.items.map((item) => {
+                            const id = item.id;
+                            if (!id) return null;
+
+                            return (
+                              <DropdownMenuCheckboxItem
+                                key={id}
+                                checked={!hiddenItemIds.includes(id)}
+                                disabled={isVisibilitySaving}
+                                onSelect={(event) => event.preventDefault()}
+                                onCheckedChange={(checked) => {
+                                  void onItemVisibilityChange(id, checked === true);
+                                }}
+                              >
+                                {item.title}
+                              </DropdownMenuCheckboxItem>
+                            );
+                          })}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    ) : null}
+                  </div>
                 ) : null
               ) : (
                 <div className="bg-muted-foreground/50 mx-2 mb-4 mt-2 h-[0.5px] dark:bg-[#262626]" />
               )}
               <div className="z-20 space-y-1 pb-2">
-                {section.items.map((item) => (
-                  <NavItem
-                    key={item.url}
-                    {...item}
-                    isActive={isUrlActive(item.url)}
-                    href={getHref(item)}
-                    target={item.target}
-                    title={item.title}
-                  />
-                ))}
+                {section.items
+                  .filter((item) => !item.id || !hiddenItemIds.includes(item.id))
+                  .map((item) => (
+                    <NavItem
+                      key={item.url}
+                      {...item}
+                      isActive={isUrlActive(item.url)}
+                      href={getHref(item)}
+                      target={item.target}
+                      title={item.title}
+                    />
+                  ))}
               </div>
             </SidebarMenuItem>
           </Collapsible>

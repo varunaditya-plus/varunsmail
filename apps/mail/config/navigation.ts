@@ -46,6 +46,7 @@ export interface NavItem {
 interface NavSection {
   title: string;
   items: NavItem[];
+  configurable?: boolean;
 }
 
 interface NavConfig {
@@ -60,6 +61,7 @@ export const navigationConfig: Record<string, NavConfig> = {
     sections: [
       {
         title: 'Core',
+        configurable: true,
         items: [
           {
             id: 'unified',
@@ -92,6 +94,7 @@ export const navigationConfig: Record<string, NavConfig> = {
       },
       {
         title: 'Workflows',
+        configurable: true,
         items: [
           {
             id: 'screening',
