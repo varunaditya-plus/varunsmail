@@ -112,6 +112,12 @@ export async function composeEmail(input: ComposeEmailInput) {
   return text;
 }
 
+export async function generateEmailSubjectForConnection(message: string, connectionId: string) {
+  const writingStyleMatrix = await getWritingStyleMatrixForConnectionId({ connectionId });
+
+  return generateSubject(message, writingStyleMatrix?.style as WritingStyleMatrix);
+}
+
 export const compose = activeConnectionProcedure
   .input(
     z.object({
@@ -155,11 +161,7 @@ export const generateEmailSubject = activeConnectionProcedure
     const { activeConnection } = ctx;
     const { message } = input;
 
-    const writingStyleMatrix = await getWritingStyleMatrixForConnectionId({
-      connectionId: activeConnection.id,
-    });
-
-    const subject = await generateSubject(message, writingStyleMatrix?.style as WritingStyleMatrix);
+    const subject = await generateEmailSubjectForConnection(message, activeConnection.id);
 
     return {
       subject,

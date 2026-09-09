@@ -86,6 +86,46 @@ const fetchLogoContent = async (logoUrl: string): Promise<string | null> => {
   }
 };
 
+export async function getBimiMetadata(input: { email: string } | { domain: string }) {
+  const domain = 'email' in input ? input.email.split('@')[1] : input.domain;
+
+  if (!domain) {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: 'Unable to extract domain from email address',
+    });
+  }
+
+  const bimiRecordText = await fetchDnsRecord(domain);
+
+  if (!bimiRecordText) {
+    return {
+      domain,
+      bimiRecord: null,
+      logo: null,
+    };
+  }
+
+  const bimiRecord = parseBimiRecord(bimiRecordText);
+
+  let logo = null;
+  if (bimiRecord.logoUrl) {
+    const svgContent = await fetchLogoContent(bimiRecord.logoUrl);
+    if (svgContent) {
+      logo = {
+        url: bimiRecord.logoUrl,
+        svgContent,
+      };
+    }
+  }
+
+  return {
+    domain,
+    bimiRecord,
+    logo,
+  };
+}
+
 export const bimiRouter = router({
   getByEmail: privateProcedure
     .input(
@@ -111,45 +151,7 @@ export const bimiRouter = router({
           .nullable(),
       }),
     )
-    .query(async ({ input }) => {
-      const domain = input.email.split('@')[1];
-
-      if (!domain) {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: 'Unable to extract domain from email address',
-        });
-      }
-
-      const bimiRecordText = await fetchDnsRecord(domain);
-
-      if (!bimiRecordText) {
-        return {
-          domain,
-          bimiRecord: null,
-          logo: null,
-        };
-      }
-
-      const bimiRecord = parseBimiRecord(bimiRecordText);
-
-      let logo = null;
-      if (bimiRecord.logoUrl) {
-        const svgContent = await fetchLogoContent(bimiRecord.logoUrl);
-        if (svgContent) {
-          logo = {
-            url: bimiRecord.logoUrl,
-            svgContent,
-          };
-        }
-      }
-
-      return {
-        domain,
-        bimiRecord,
-        logo,
-      };
-    }),
+    .query(({ input }) => getBimiMetadata({ email: input.email })),
 
   getByDomain: privateProcedure
     .input(
@@ -175,34 +177,5 @@ export const bimiRouter = router({
           .nullable(),
       }),
     )
-    .query(async ({ input }) => {
-      const bimiRecordText = await fetchDnsRecord(input.domain);
-
-      if (!bimiRecordText) {
-        return {
-          domain: input.domain,
-          bimiRecord: null,
-          logo: null,
-        };
-      }
-
-      const bimiRecord = parseBimiRecord(bimiRecordText);
-
-      let logo = null;
-      if (bimiRecord.logoUrl) {
-        const svgContent = await fetchLogoContent(bimiRecord.logoUrl);
-        if (svgContent) {
-          logo = {
-            url: bimiRecord.logoUrl,
-            svgContent,
-          };
-        }
-      }
-
-      return {
-        domain: input.domain,
-        bimiRecord,
-        logo,
-      };
-    }),
+    .query(({ input }) => getBimiMetadata({ domain: input.domain })),
 });
