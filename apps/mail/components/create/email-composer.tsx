@@ -70,7 +70,6 @@ interface EmailComposerProps {
   initialSubject?: string;
   initialMessage?: string;
   initialAttachments?: File[];
-  replyingTo?: string;
   onSendEmail: (data: {
     to: string[];
     cc?: string[];

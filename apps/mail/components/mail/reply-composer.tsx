@@ -11,11 +11,12 @@ import { useSettings } from '@/hooks/use-settings';
 import { useThread } from '@/hooks/use-threads';
 import { useSession } from '@/lib/auth-client';
 import { serializeFiles } from '@/lib/schemas';
+import { parseFrom } from '@/lib/email-utils';
 import { useDraft } from '@/hooks/use-drafts';
 import { m } from '@/paraglide/messages';
-import type { Sender } from '@/types';
+import type { IConnection, Sender } from '@/types';
 import { useQueryState } from 'nuqs';
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import posthog from 'posthog-js';
 import { toast } from 'sonner';
 
@@ -23,27 +24,38 @@ interface ReplyComposeProps {
   messageId?: string;
 }
 
+function ensureEmailArray(emails: string | string[] | undefined | null) {
+  if (!emails) return [];
+  const values = Array.isArray(emails) ? emails : emails.split(',');
+  return values.map((email) => email.trim().replace(/[<>]/g, '')).filter(Boolean);
+}
+
 export default function ReplyCompose({ messageId }: ReplyComposeProps) {
   const [mode, setMode] = useQueryState('mode');
   const { enableScope, disableScope } = useHotkeysContext();
   const [connectionId] = useQueryState('connectionId');
+  const { data: activeConnection } = useActiveConnection();
   const { mailbox: aliasMailbox, isActive: isAliasMailboxActive } = useAliasMailbox();
   const replyConnectionId = isAliasMailboxActive
     ? (aliasMailbox?.sourceConnectionId ?? null)
-    : connectionId;
-  const { data: aliases } = useEmailAliases(replyConnectionId);
+    : (connectionId ?? activeConnection?.id ?? null);
+  const { data: aliases, isFetching: isAliasesFetching } = useEmailAliases(replyConnectionId);
 
   const [draftId, setDraftId] = useQueryState('draftId');
   const [threadId] = useQueryState('threadId');
   const [, setActiveReplyId] = useQueryState('activeReplyId');
   const { data: emailData, refetch, latestDraft } = useThread(threadId, replyConnectionId);
-  const { data: draft } = useDraft(draftId ?? null, replyConnectionId);
+  const { data: draft, isFetching: isDraftFetching } = useDraft(
+    draftId ?? null,
+    replyConnectionId,
+  );
   const trpc = useTRPC();
   const { mutateAsync: sendEmail } = useMutation(trpc.mail.send.mutationOptions());
-  const { data: activeConnection } = useActiveConnection();
   const { data: connectionData } = useConnections();
   const replyConnection =
-    connectionData?.connections.find((connection) => connection.id === replyConnectionId) ??
+    connectionData?.connections.find(
+      (connection: IConnection) => connection.id === replyConnectionId,
+    ) ??
     activeConnection;
   const { data: settings, isLoading: settingsLoading } = useSettings();
   const { data: session } = useSession();
@@ -53,60 +65,93 @@ export default function ReplyCompose({ messageId }: ReplyComposeProps) {
   const replyToMessage =
     (messageId && emailData?.messages.find((msg) => msg.id === messageId)) || emailData?.latest;
 
-  // Initialize recipients and subject when mode changes
-  useEffect(() => {
-    if (!replyToMessage || !mode || !replyConnection?.email) return;
-
-    const userEmail = replyConnection.email.toLowerCase();
-    const senderEmail = replyToMessage.sender.email.toLowerCase();
-
-    // Set subject based on mode
-
-    if (mode === 'reply') {
-      // Reply to sender
-      const to: string[] = [];
-
-      // If the sender is not the current user, add them to the recipients
-      if (senderEmail !== userEmail) {
-        to.push(replyToMessage.sender.email);
-      } else if (replyToMessage.to && replyToMessage.to.length > 0 && replyToMessage.to[0]?.email) {
-        // If we're replying to our own email, reply to the first recipient
-        to.push(replyToMessage.to[0].email);
-      }
-
-      // Initialize email composer with these recipients
-      // Note: The actual initialization happens in the EmailComposer component
-    } else if (mode === 'replyAll') {
-      const to: string[] = [];
-      const cc: string[] = [];
-
-      // Add original sender if not current user
-      if (senderEmail !== userEmail) {
-        to.push(replyToMessage.sender.email);
-      }
-
-      // Add original recipients from To field
-      replyToMessage.to?.forEach((recipient) => {
-        const recipientEmail = recipient.email.toLowerCase();
-        if (recipientEmail !== userEmail && recipientEmail !== senderEmail) {
-          to.push(recipient.email);
-        }
-      });
-
-      // Add CC recipients
-      replyToMessage.cc?.forEach((recipient) => {
-        const recipientEmail = recipient.email.toLowerCase();
-        if (recipientEmail !== userEmail && !to.includes(recipient.email)) {
-          cc.push(recipient.email);
-        }
-      });
-
-      // Initialize email composer with these recipients
-    } else if (mode === 'forward') {
-      // For forward, we start with empty recipients
-      // Just set the subject and include the original message
+  const initial = useMemo(() => {
+    if (!replyToMessage || !mode || !replyConnection?.email) {
+      return { to: [], cc: [], bcc: [], subject: '', preferredFromEmail: undefined };
     }
-  }, [mode, replyToMessage, replyConnection?.email]);
+
+    const selfAddresses = new Set(
+      [replyConnection.email, aliasMailbox?.email, ...(aliases ?? []).map((alias) => alias.email)]
+        .filter(Boolean)
+        .map((email) => email!.trim().toLowerCase()),
+    );
+    const originalRecipients = [
+      ...(replyToMessage.to || []),
+      ...(replyToMessage.cc || []),
+      ...(replyToMessage.bcc || []),
+    ];
+    const addressedAlias = aliases?.find((alias) =>
+      [replyToMessage.sender, ...originalRecipients].some(
+        (recipient) => recipient.email.toLowerCase() === alias.email.toLowerCase(),
+      ),
+    );
+    const preferredFromEmail = isAliasMailboxActive ? aliasMailbox?.email : addressedAlias?.email;
+    const draftMessage = draft || latestDraft;
+    const subjectPrefix = mode === 'forward' ? 'Fwd:' : 'Re:';
+    const subjectPattern = mode === 'forward' ? /^(fwd?|forward):/i : /^(re|aw|sv):/i;
+    const subject = subjectPattern.test(replyToMessage.subject)
+      ? replyToMessage.subject
+      : `${subjectPrefix} ${replyToMessage.subject}`;
+
+    if (draftMessage) {
+      return {
+        to: draft
+          ? ensureEmailArray(draft.to)
+          : latestDraft?.to.map((recipient) => recipient.email) ?? [],
+        cc: draft
+          ? ensureEmailArray(draft.cc)
+          : latestDraft?.cc?.map((recipient) => recipient.email) ?? [],
+        bcc: draft
+          ? ensureEmailArray(draft.bcc)
+          : latestDraft?.bcc?.map((recipient) => recipient.email) ?? [],
+        subject: draftMessage.subject || subject,
+        preferredFromEmail,
+      };
+    }
+
+    if (mode === 'forward') {
+      return { to: [], cc: [], bcc: [], subject, preferredFromEmail };
+    }
+
+    const to: string[] = [];
+    const cc: string[] = [];
+    const seen = new Set<string>();
+    const addRecipient = (target: string[], email?: string) => {
+      const normalized = email?.trim().toLowerCase();
+      if (!email || !normalized || selfAddresses.has(normalized) || seen.has(normalized)) return;
+      seen.add(normalized);
+      target.push(email);
+    };
+    const parsedReplyTo = replyToMessage.replyTo ? parseFrom(replyToMessage.replyTo).email : '';
+    const replyAddress =
+      parsedReplyTo === 'no-sender@unknown'
+        ? replyToMessage.sender.email
+        : parsedReplyTo || replyToMessage.sender.email;
+
+    addRecipient(to, replyAddress);
+    if (!to.length) {
+      const externalRecipient = originalRecipients.find(
+        (recipient) => !selfAddresses.has(recipient.email.toLowerCase()),
+      );
+      addRecipient(to, externalRecipient?.email);
+    }
+
+    if (mode === 'replyAll') {
+      replyToMessage.to?.forEach((recipient) => addRecipient(to, recipient.email));
+      replyToMessage.cc?.forEach((recipient) => addRecipient(cc, recipient.email));
+    }
+
+    return { to, cc, bcc: [], subject, preferredFromEmail };
+  }, [
+    aliasMailbox?.email,
+    aliases,
+    draft,
+    isAliasMailboxActive,
+    latestDraft,
+    mode,
+    replyConnection?.email,
+    replyToMessage,
+  ]);
 
   const handleSendEmail = async (data: {
     to: string[];
@@ -130,9 +175,11 @@ export default function ReplyCompose({ messageId }: ReplyComposeProps) {
       const selectedAlias = aliases?.find(
         (alias) => alias.email.toLowerCase() === selectedAddress,
       );
+      const isConfiguredAlias =
+        isAliasMailboxActive && aliasMailbox?.email.toLowerCase() === selectedAddress;
 
-      if (selectedAlias || selectedAddress === userEmail) {
-        senderAddress = selectedAlias?.email ?? replyConnection.email;
+      if (selectedAlias || selectedAddress === userEmail || isConfiguredAlias) {
+        senderAddress = selectedAlias?.email ?? aliasMailbox?.email ?? replyConnection.email;
       } else if (aliases && aliases.length > 0) {
         const allRecipients = [
           ...(replyToMessage.to || []),
@@ -254,28 +301,23 @@ export default function ReplyCompose({ messageId }: ReplyComposeProps) {
     };
   }, [mode, enableScope, disableScope]);
 
-  const ensureEmailArray = (emails: string | string[] | undefined | null): string[] => {
-    if (!emails) return [];
-    if (Array.isArray(emails)) {
-      return emails.map((email) => email.trim().replace(/[<>]/g, ''));
-    }
-    if (typeof emails === 'string') {
-      return emails
-        .split(',')
-        .map((email) => email.trim())
-        .filter((email) => email.length > 0)
-        .map((email) => email.replace(/[<>]/g, ''));
-    }
-    return [];
-  };
-
-  if (!mode || !emailData) return null;
+  if (
+    !mode ||
+    !emailData ||
+    !replyConnection ||
+    isAliasesFetching ||
+    isDraftFetching ||
+    (isAliasMailboxActive && !aliasMailbox)
+  ) {
+    return null;
+  }
 
   return (
     <div className="w-full rounded-2xl overflow-visible border">
       <EmailComposer
-        connectionId={replyConnection?.id}
-        preferredFromEmail={isAliasMailboxActive ? aliasMailbox?.email : undefined}
+        key={`${replyToMessage?.id}:${mode}:${draft?.id ?? latestDraft?.id ?? ''}`}
+        connectionId={replyConnection.id}
+        preferredFromEmail={initial.preferredFromEmail}
         editorClassName="min-h-[50px]"
         className="w-full max-w-none! pb-1 overflow-visible"
         onSendEmail={handleSendEmail}
@@ -285,13 +327,12 @@ export default function ReplyCompose({ messageId }: ReplyComposeProps) {
           setActiveReplyId(null);
         }}
         initialMessage={draft?.content ?? latestDraft?.decodedBody}
-        initialTo={ensureEmailArray(draft?.to)}
-        initialCc={ensureEmailArray(draft?.cc)}
-        initialBcc={ensureEmailArray(draft?.bcc)}
-        initialSubject={draft?.subject}
+        initialTo={initial.to}
+        initialCc={initial.cc}
+        initialBcc={initial.bcc}
+        initialSubject={initial.subject}
         autofocus={true}
         settingsLoading={settingsLoading}
-        replyingTo={replyToMessage?.sender.email}
       />
     </div>
   );
