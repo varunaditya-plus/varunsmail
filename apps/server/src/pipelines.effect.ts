@@ -86,7 +86,6 @@ export const getPrompt = async (
 
     const existingPrompt = await env.prompts_storage.get(promptName);
     if (!existingPrompt) {
-      await env.prompts_storage.put(promptName, fallback);
       return appendContext(appendSecurePrompt(fallback), context);
     }
     return appendContext(appendSecurePrompt(existingPrompt), context);
