@@ -24,6 +24,7 @@ export const useThreads = () => {
   const [accountFilter] = useQueryState('accounts');
   const { data: connectionsData } = useConnections();
   const isUnifiedInbox = folder === 'unified';
+  const isWorkflowView = ['screening', 'bundles', 'focus', 'rules'].includes(folder ?? '');
   const gmailConnectionIds = useMemo(
     () =>
       new Set(
@@ -63,7 +64,7 @@ export const useThreads = () => {
         labelIds: labels,
       },
       {
-        enabled: !isUnifiedInbox,
+        enabled: !isUnifiedInbox && !isWorkflowView,
         initialCursor: '',
         getNextPageParam: (lastPage) => lastPage?.nextPageToken ?? null,
         staleTime: 60 * 1000 * 1, // 1 minute
