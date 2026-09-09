@@ -349,9 +349,6 @@ function AISidebar({ className }: AISidebarProps) {
   });
 
   const chatState = useAgentChat({
-    getInitialMessages: async () => {
-      return [];
-    },
     agent,
     maxSteps: 10,
     body: {

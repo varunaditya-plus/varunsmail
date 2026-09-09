@@ -7,6 +7,7 @@ import type { useAgentChat } from 'agents/ai-react';
 import { Markdown } from '@react-email/components';
 import { TextShimmer } from '../ui/text-shimmer';
 import { getAccountColor } from '@/lib/thread-ref';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { useThread } from '@/hooks/use-threads';
 import { MailLabels } from '../mail/mail-list';
 import { cn, getEmailLogo } from '@/lib/utils';
@@ -113,6 +114,8 @@ function hasLabels(result: unknown): result is { labels: Label[] } {
 }
 
 const SearchSourcePreview = ({ source }: { source: MailboxSearchSource }) => {
+  const isMobile = useIsMobile();
+  const { isPopup, setOpen } = useAISidebar();
   const [, setThreadReference] = useQueryStates({
     threadId: parseAsString,
     connectionId: parseAsString,
@@ -127,6 +130,7 @@ const SearchSourcePreview = ({ source }: { source: MailboxSearchSource }) => {
       connectionId: source.connectionId,
     });
     void setIsFullScreen(null);
+    if (isMobile || isPopup) setOpen(false);
   };
 
   return (
