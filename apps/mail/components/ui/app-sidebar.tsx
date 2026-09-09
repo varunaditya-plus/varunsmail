@@ -49,7 +49,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   );
 
   useEffect(() => {
-    if (settings) setHiddenSidebarItems(settings.settings.hiddenSidebarItems);
+    if (settings) setHiddenSidebarItems(settings.settings.hiddenSidebarItems ?? []);
   }, [settings]);
 
   async function setSidebarItemVisibility(itemId: string, visible: boolean) {
