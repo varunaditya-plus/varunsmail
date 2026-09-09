@@ -42,7 +42,8 @@
     {
       "binding": "DB",
       "database_name": "varunsmail-db",
-      "database_id": "5c12f95f-366e-40d3-a1b7-a9fe82f9796a"
+      "database_id": "5c12f95f-366e-40d3-a1b7-a9fe82f9796a",
+      "migrations_dir": "src/db/migrations-d1"
     }
   ],
   "ai": {
