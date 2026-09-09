@@ -8,17 +8,17 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { Bell, Lightning, Mail, ScanEye, Tag, User, X, Search } from '../icons/icons';
 import { useCategorySettings, useDefaultCategoryId } from '@/hooks/use-categories';
 import { ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
+import { ArrowUpDown, Check, ChevronDown, RefreshCcw } from 'lucide-react';
 import { useCommandPalette } from '../context/command-palette-context';
 import { useHotkeys, useHotkeysContext } from 'react-hotkeys-hook';
 import { ThreadDisplay } from '@/components/mail/thread-display';
+import { AccountFilter } from '@/components/mail/account-filter';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useActiveConnection } from '@/hooks/use-connections';
-import { Check, ChevronDown, RefreshCcw } from 'lucide-react';
 import { useMediaQuery } from '../../hooks/use-media-query';
 import useSearchLabels from '@/hooks/use-labels-search';
 import * as CustomIcons from '@/components/icons/icons';
 import { MailList } from '@/components/mail/mail-list';
-import { AccountFilter } from '@/components/mail/account-filter';
 import { useNavigate, useParams } from 'react-router';
 import { useMail } from '@/components/mail/use-mail';
 import { SidebarToggle } from '../ui/sidebar-toggle';
@@ -325,6 +325,10 @@ export function MailLayout() {
   const { data: activeConnection } = useActiveConnection();
   const { activeFilters, clearAllFilters } = useCommandPalette();
   const [, setIsCommandPaletteOpen] = useQueryState('isCommandPaletteOpen');
+  const [sort, setSort] = useQueryState('sort');
+  const activeSort = ['newest', 'oldest', 'sender', 'domain'].includes(sort ?? '')
+    ? sort
+    : 'newest';
 
   useEffect(() => {
     if (prevFolderRef.current !== folder && mail.bulkSelected.length > 0) {
@@ -485,6 +489,33 @@ export function MailLayout() {
 
                       {folder === 'unified' && <AccountFilter />}
 
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="outline" size="icon" className="h-10 w-10">
+                            <ArrowUpDown className="h-4 w-4" />
+                            <span className="sr-only">Sort mail</span>
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          {[
+                            ['newest', 'Newest first'],
+                            ['oldest', 'Oldest first'],
+                            ['sender', 'Sender'],
+                            ['domain', 'Sender domain'],
+                          ].map(([value, label]) => (
+                            <DropdownMenuItem key={value} onSelect={() => void setSort(value)}>
+                              <Check
+                                className={cn(
+                                  'mr-2 h-4 w-4',
+                                  activeSort === value ? 'opacity-100' : 'opacity-0',
+                                )}
+                              />
+                              {label}
+                            </DropdownMenuItem>
+                          ))}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+
                       {activeConnection?.providerId === 'google' && folder === 'inbox' && (
                         <CategoryDropdown isMultiSelectMode={mail.bulkSelected.length > 0} />
                       )}
@@ -517,7 +548,7 @@ export function MailLayout() {
                     onClick={handleRefetchThreads}
                     variant="ghost"
                     size="icon"
-                    className="border-none bg-transparent hover:bg-accent/50 h-10 w-10 rounded-lg backdrop-blur-sm"
+                    className="hover:bg-accent/50 h-10 w-10 rounded-lg border-none bg-transparent backdrop-blur-sm"
                   >
                     <RefreshCcw className="text-muted-foreground h-4 w-4" />
                   </Button>

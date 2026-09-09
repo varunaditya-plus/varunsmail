@@ -6,6 +6,7 @@ import { z } from 'zod';
 const threadRef = z.object({ connectionId: z.string().min(1), threadId: z.string().min(1) });
 const ruleAction = z.enum(['archive', 'label', 'important']);
 const screeningDecision = z.enum(['allow', 'archive', 'block', 'spam']);
+const smartFolderSort = z.enum(['newest', 'oldest', 'sender', 'domain']);
 const bundleMatcher = z
   .object({
     connectionId: z.string().min(1).optional(),
@@ -14,7 +15,11 @@ const bundleMatcher = z
   })
   .superRefine((matcher, context) => {
     if (matcher.kind === 'sender' && !matcher.value?.trim()) {
-      context.addIssue({ code: 'custom', message: 'Sender matchers require an email', path: ['value'] });
+      context.addIssue({
+        code: 'custom',
+        message: 'Sender matchers require an email',
+        path: ['value'],
+      });
     }
   });
 const deliveryTimes = z.array(z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/));
@@ -28,19 +33,52 @@ const activityRouter = router({
   })),
   forceSync: privateProcedure
     .input(z.object({ connectionId: z.string().min(1) }))
-    .mutation(async ({ ctx, input }) =>
-      service(ctx.sessionUser.id).forceSync(input.connectionId),
-    ),
+    .mutation(async ({ ctx, input }) => service(ctx.sessionUser.id).forceSync(input.connectionId)),
   retryOutbox: privateProcedure
     .input(z.object({ messageId: z.string().min(1) }))
-    .mutation(async ({ ctx, input }) =>
-      service(ctx.sessionUser.id).retryOutbox(input.messageId),
-    ),
+    .mutation(async ({ ctx, input }) => service(ctx.sessionUser.id).retryOutbox(input.messageId)),
   cancelOutbox: privateProcedure
     .input(z.object({ messageId: z.string().min(1) }))
-    .mutation(async ({ ctx, input }) =>
-      service(ctx.sessionUser.id).cancelOutbox(input.messageId),
-    ),
+    .mutation(async ({ ctx, input }) => service(ctx.sessionUser.id).cancelOutbox(input.messageId)),
+});
+
+const smartFoldersRouter = router({
+  list: privateProcedure.query(async ({ ctx }) => ({
+    folders: await service(ctx.sessionUser.id).listSmartFolders(),
+  })),
+  get: privateProcedure
+    .input(z.object({ id: z.string().min(1) }))
+    .query(async ({ ctx, input }) => service(ctx.sessionUser.id).getSmartFolder(input.id)),
+  create: privateProcedure
+    .input(
+      z.object({
+        name: z.string().trim().min(1),
+        query: z.string().trim().min(1),
+        connectionId: z.string().min(1).optional(),
+        sort: smartFolderSort,
+      }),
+    )
+    .mutation(async ({ ctx, input }) => ({
+      folder: await service(ctx.sessionUser.id).createSmartFolder(input),
+    })),
+  update: privateProcedure
+    .input(
+      z.object({
+        id: z.string().min(1),
+        name: z.string().trim().min(1).optional(),
+        query: z.string().trim().min(1).optional(),
+        connectionId: z.string().min(1).nullable().optional(),
+        sort: smartFolderSort.optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input: { id, ...input } }) => ({
+      folder: await service(ctx.sessionUser.id).updateSmartFolder(id, input),
+    })),
+  delete: privateProcedure
+    .input(z.object({ id: z.string().min(1) }))
+    .mutation(async ({ ctx, input }) => ({
+      deleted: await service(ctx.sessionUser.id).deleteSmartFolder(input.id),
+    })),
 });
 
 const cleanupRouter = router({
@@ -111,9 +149,11 @@ const remindersRouter = router({
 });
 
 const screeningRouter = router({
-  getConfig: privateProcedure.input(z.object({ connectionId: z.string().min(1) })).query(
-    async ({ ctx, input }) => service(ctx.sessionUser.id).getScreeningConfig(input.connectionId),
-  ),
+  getConfig: privateProcedure
+    .input(z.object({ connectionId: z.string().min(1) }))
+    .query(async ({ ctx, input }) =>
+      service(ctx.sessionUser.id).getScreeningConfig(input.connectionId),
+    ),
   setEnabled: privateProcedure
     .input(z.object({ connectionId: z.string().min(1), enabled: z.boolean() }))
     .mutation(async ({ ctx, input }) =>
@@ -138,11 +178,11 @@ const screeningRouter = router({
 });
 
 const rulesRouter = router({
-  labels: privateProcedure.input(z.object({ connectionId: z.string().min(1) })).query(
-    async ({ ctx, input }) => ({
+  labels: privateProcedure
+    .input(z.object({ connectionId: z.string().min(1) }))
+    .query(async ({ ctx, input }) => ({
       labels: await service(ctx.sessionUser.id).listRuleLabels(input.connectionId),
-    }),
-  ),
+    })),
   preview: privateProcedure
     .input(threadRef.extend({ action: ruleAction, labelId: z.string().min(1).optional() }))
     .query(async ({ ctx, input }) =>
@@ -173,9 +213,11 @@ const rulesRouter = router({
     .mutation(async ({ ctx, input }) => ({
       rule: await service(ctx.sessionUser.id).setRuleEnabled(input.id, input.enabled),
     })),
-  delete: privateProcedure.input(z.object({ id: z.string().min(1) })).mutation(async ({ ctx, input }) => ({
-    deleted: await service(ctx.sessionUser.id).deleteRule(input.id),
-  })),
+  delete: privateProcedure
+    .input(z.object({ id: z.string().min(1) }))
+    .mutation(async ({ ctx, input }) => ({
+      deleted: await service(ctx.sessionUser.id).deleteRule(input.id),
+    })),
 });
 
 const bundlesRouter = router({
@@ -215,9 +257,11 @@ const bundlesRouter = router({
     .mutation(async ({ ctx, input: { id, ...input } }) => ({
       bundle: await service(ctx.sessionUser.id).updateBundle(id, input),
     })),
-  delete: privateProcedure.input(z.object({ id: z.string().min(1) })).mutation(async ({ ctx, input }) => ({
-    deleted: await service(ctx.sessionUser.id).deleteBundle(input.id),
-  })),
+  delete: privateProcedure
+    .input(z.object({ id: z.string().min(1) }))
+    .mutation(async ({ ctx, input }) => ({
+      deleted: await service(ctx.sessionUser.id).deleteBundle(input.id),
+    })),
   releaseNow: privateProcedure
     .input(z.object({ id: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => service(ctx.sessionUser.id).releaseBundle(input.id)),
@@ -246,6 +290,7 @@ const focusRouter = router({
 
 export const mailboxWorkflowsRouter = router({
   activity: activityRouter,
+  smartFolders: smartFoldersRouter,
   cleanup: cleanupRouter,
   reminders: remindersRouter,
   screening: screeningRouter,

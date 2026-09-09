@@ -3,9 +3,9 @@ import { Collapsible, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useCommandPalette } from '../context/command-palette-context.jsx';
 import { LabelDialog } from '@/components/labels/label-dialog';
 import { useActiveConnection } from '@/hooks/use-connections';
-import { useMutation } from '@tanstack/react-query';
 import { useSidebar } from '../context/sidebar-context';
 import { useTRPC } from '@/providers/query-provider';
+import { useMutation } from '@tanstack/react-query';
 import { type NavItem } from '@/config/navigation';
 import type { Label as LabelType } from '@/types';
 import { Link, useLocation } from 'react-router';
@@ -51,7 +51,7 @@ type IconRefType = SVGSVGElement & {
 export function NavMain({ items, isBottomNav = false }: NavMainProps) {
   const location = useLocation();
   const pathname = location.pathname;
-  const searchParams = new URLSearchParams();
+  const searchParams = new URLSearchParams(location.search);
 
   const trpc = useTRPC();
   const { mutateAsync: createLabel } = useMutation(trpc.labels.create.mutationOptions());
@@ -152,13 +152,13 @@ export function NavMain({ items, isBottomNav = false }: NavMainProps) {
         await refetch();
         return result;
       });
-      
+
       toast.promise(promise, {
         loading: 'Creating label...',
         success: 'Label created successfully',
         error: 'Failed to create label',
       });
-      
+
       await promise;
     } catch (error) {
       console.error('Failed to create label:', error);

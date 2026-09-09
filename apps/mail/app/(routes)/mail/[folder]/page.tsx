@@ -1,12 +1,13 @@
 import { useLoaderData, useNavigate } from 'react-router';
 
-import { MailLayout } from '@/components/mail/mail';
-import { FocusReply } from '@/components/mail/focus-reply';
-import { MailBundles } from '@/components/mail/mail-bundles';
-import { MailRules } from '@/components/mail/mail-rules';
-import { MailboxActivity } from '@/components/mail/mailbox-activity';
 import { SenderScreening } from '@/components/mail/sender-screening';
+import { MailboxActivity } from '@/components/mail/mailbox-activity';
 import { SenderCleanup } from '@/components/mail/sender-cleanup';
+import { SmartFolders } from '@/components/mail/smart-folders';
+import { MailBundles } from '@/components/mail/mail-bundles';
+import { FocusReply } from '@/components/mail/focus-reply';
+import { MailRules } from '@/components/mail/mail-rules';
+import { MailLayout } from '@/components/mail/mail';
 import { useLabels } from '@/hooks/use-labels';
 import { authProxy } from '@/lib/auth-proxy';
 import { useEffect, useState } from 'react';
@@ -27,12 +28,14 @@ const ALLOWED_FOLDERS = new Set([
   'rules',
   'activity',
   'cleanup',
+  'smart',
 ]);
 
 type LabelNode = { id?: string; labels?: LabelNode[] };
 
 export async function clientLoader({ params, request }: Route.ClientLoaderArgs) {
-  if (!params.folder) return Response.redirect(`${import.meta.env.VITE_PUBLIC_APP_URL}/mail/unified`);
+  if (!params.folder)
+    return Response.redirect(`${import.meta.env.VITE_PUBLIC_APP_URL}/mail/unified`);
 
   const session = await authProxy.api.getSession({ headers: request.headers });
   if (!session) return Response.redirect(`${import.meta.env.VITE_PUBLIC_APP_URL}/login`);
@@ -101,5 +104,6 @@ export default function MailPage() {
   if (folder === 'rules') return <MailRules />;
   if (folder === 'activity') return <MailboxActivity />;
   if (folder === 'cleanup') return <SenderCleanup />;
+  if (folder === 'smart') return <SmartFolders />;
   return <MailLayout />;
 }

@@ -18,6 +18,7 @@ import {
 import {
   Activity,
   Brush,
+  FolderSearch,
   ListFilter,
   ListTodo,
   MailCheck,
@@ -125,6 +126,12 @@ export const navigationConfig: Record<string, NavConfig> = {
             title: 'Sender cleanup',
             url: '/mail/cleanup',
             icon: Brush,
+          },
+          {
+            id: 'smart',
+            title: 'Smart folders',
+            url: '/mail/smart',
+            icon: FolderSearch,
           },
         ],
       },

@@ -1,9 +1,9 @@
 import { backgroundQueueAtom, isThreadInBackgroundQueueAtom } from '@/store/backgroundQueue';
 import { useInfiniteQuery, useQuery, useMutation } from '@tanstack/react-query';
 import type { IGetThreadResponse } from '../../server/src/lib/driver/types';
-import { useSearchValue } from '@/hooks/use-search-value';
 import { isSharedGmailLabel, threadKey } from '@/lib/thread-ref';
 import { useAliasMailbox } from '@/hooks/use-alias-mailbox';
+import { useSearchValue } from '@/hooks/use-search-value';
 import { useConnections } from '@/hooks/use-connections';
 import { useTRPC } from '@/providers/query-provider';
 import useSearchLabels from './use-labels-search';
@@ -28,9 +28,28 @@ export const useThreads = () => {
     isResolving: isAliasMailboxResolving,
   } = useAliasMailbox();
   const [accountFilter] = useQueryState('accounts');
+  const [smartFolderId] = useQueryState('smart');
+  const [sortParam] = useQueryState('sort');
   const { data: connectionsData } = useConnections();
-  const isUnifiedInbox = folder === 'unified';
-  const isWorkflowView = ['screening', 'bundles', 'focus', 'rules'].includes(folder ?? '');
+  const smartFolderQuery = useQuery(
+    trpc.mailboxWorkflows.smartFolders.get.queryOptions(
+      { id: smartFolderId ?? '' },
+      { enabled: !!smartFolderId, staleTime: 60 * 1000 },
+    ),
+  );
+  const smartFolder = smartFolderQuery.data;
+  const isSmartFolderReady = !smartFolderId || !!smartFolder;
+  const isUnifiedInbox = folder === 'unified' || (!!smartFolderId && !smartFolder?.connectionId);
+  const isWorkflowView = [
+    'screening',
+    'bundles',
+    'focus',
+    'rules',
+    'activity',
+    'cleanup',
+    'smart',
+    'files',
+  ].includes(folder ?? '');
   const gmailConnectionIds = useMemo(
     () =>
       new Set(
@@ -41,21 +60,23 @@ export const useThreads = () => {
     [connectionsData?.connections],
   );
   const connectionIds = accountFilter?.split(',').filter((id) => gmailConnectionIds.has(id)) ?? [];
+  const effectiveSearch = [smartFolder?.query, searchValue.value]
+    .map((value) => value?.trim())
+    .filter(Boolean)
+    .join(' ');
   const unifiedLabels = labels.filter(isSharedGmailLabel);
   const connectionLabels =
-    isAliasMailboxActive && aliasMailbox
-      ? [...new Set([...labels, aliasMailbox.labelId])]
-      : labels;
+    isAliasMailboxActive && aliasMailbox ? [...new Set([...labels, aliasMailbox.labelId])] : labels;
 
   const unifiedQuery = useInfiniteQuery(
     trpc.mail.listUnifiedThreads.infiniteQueryOptions(
       {
-        q: searchValue.value,
+        q: effectiveSearch,
         labelIds: unifiedLabels,
         connectionIds,
       },
       {
-        enabled: isUnifiedInbox,
+        enabled: isUnifiedInbox && isSmartFolderReady,
         initialCursor: '',
         getNextPageParam: (lastPage) => lastPage?.nextPageToken ?? null,
         staleTime: 60 * 1000,
@@ -69,15 +90,18 @@ export const useThreads = () => {
   const connectionQuery = useInfiniteQuery(
     trpc.mail.listThreads.infiniteQueryOptions(
       {
-        q: searchValue.value,
+        q: effectiveSearch,
         folder,
         labelIds: connectionLabels,
-        connectionId: isAliasMailboxActive ? aliasMailbox?.sourceConnectionId : undefined,
+        connectionId:
+          smartFolder?.connectionId ??
+          (isAliasMailboxActive ? aliasMailbox?.sourceConnectionId : undefined),
       },
       {
         enabled:
           !isUnifiedInbox &&
           !isWorkflowView &&
+          isSmartFolderReady &&
           !isAliasMailboxResolving &&
           (!isAliasMailboxActive || !!aliasMailbox),
         initialCursor: '',
@@ -96,7 +120,7 @@ export const useThreads = () => {
     if (!threadsQuery.data) return [];
 
     const seen = new Set<string>();
-    return threadsQuery.data.pages
+    const loaded = threadsQuery.data.pages
       .flatMap((page) => page.threads)
       .filter(Boolean)
       .filter((thread) => {
@@ -105,7 +129,35 @@ export const useThreads = () => {
         seen.add(key);
         return true;
       });
-  }, [threadsQuery.data, threadsQuery.dataUpdatedAt, isInQueue, backgroundQueue]);
+    const sort = ['newest', 'oldest', 'sender', 'domain'].includes(sortParam ?? '')
+      ? sortParam
+      : (smartFolder?.sort ?? 'newest');
+    const newest = (a: (typeof loaded)[number], b: (typeof loaded)[number]) =>
+      (b.receivedOn ?? '').localeCompare(a.receivedOn ?? '') || b.id.localeCompare(a.id);
+    return loaded.sort((a, b) => {
+      if (sort === 'oldest') return -newest(a, b);
+      if (sort === 'sender') {
+        const sender = (a.senderName || a.senderEmail || '').localeCompare(
+          b.senderName || b.senderEmail || '',
+        );
+        return sender || newest(a, b);
+      }
+      if (sort === 'domain') {
+        const domain = (a.senderEmail?.split('@').at(-1) ?? '').localeCompare(
+          b.senderEmail?.split('@').at(-1) ?? '',
+        );
+        return domain || newest(a, b);
+      }
+      return newest(a, b);
+    });
+  }, [
+    threadsQuery.data,
+    threadsQuery.dataUpdatedAt,
+    isInQueue,
+    backgroundQueue,
+    sortParam,
+    smartFolder?.sort,
+  ]);
 
   const partialFailures = useMemo(
     () =>
@@ -198,20 +250,17 @@ export const useThread = (threadId: string | null, connectionId?: string | null)
   // Extract image loading condition to avoid duplication
   const shouldLoadImages = useMemo(() => {
     if (!settings?.settings || !latestMessage?.sender?.email) return false;
-    
-    return settings.settings.externalImages ||
+
+    return (
+      settings.settings.externalImages ||
       settings.settings.trustedSenders?.includes(latestMessage.sender.email) ||
-      false;
+      false
+    );
   }, [settings?.settings, latestMessage?.sender?.email]);
 
   // Prefetch query - intentionally unused, just for caching
   useQuery({
-    queryKey: [
-      'email-content',
-      latestMessage?.id,
-      shouldLoadImages,
-      systemTheme,
-    ],
+    queryKey: ['email-content', latestMessage?.id, shouldLoadImages, systemTheme],
     queryFn: async () => {
       if (!latestMessage?.decodedBody || !settings?.settings) return null;
 

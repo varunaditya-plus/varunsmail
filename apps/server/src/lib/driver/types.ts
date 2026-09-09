@@ -64,7 +64,10 @@ export interface MailManager {
   >;
   get(id: string): Promise<IGetThreadResponse>;
   create(data: IOutgoingMessage): Promise<{ id?: string | null; threadId?: string | null }>;
-  sendDraft(id: string, data: IOutgoingMessage): Promise<{ id?: string | null; threadId?: string | null } | void>;
+  sendDraft(
+    id: string,
+    data: IOutgoingMessage,
+  ): Promise<{ id?: string | null; threadId?: string | null } | void>;
   createDraft(
     data: CreateDraftData,
   ): Promise<{ id?: string | null; success?: boolean; error?: string }>;
@@ -127,6 +130,9 @@ export interface ThreadListItem {
   connectionId?: string;
   key?: string;
   receivedOn?: string;
+  subject?: string;
+  senderEmail?: string;
+  senderName?: string;
   account?: {
     id: string;
     email: string;
@@ -150,6 +156,9 @@ export const IGetThreadsResponseSchema = z.object({
       connectionId: z.string().optional(),
       key: z.string().optional(),
       receivedOn: z.string().optional(),
+      subject: z.string().optional(),
+      senderEmail: z.string().optional(),
+      senderName: z.string().optional(),
       account: z
         .object({
           id: z.string(),

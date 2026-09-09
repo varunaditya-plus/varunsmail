@@ -31,13 +31,10 @@ import {
   senderDecision,
   senderScreenedThread,
   senderScreeningConfig,
+  smartFolder,
   threadReminder,
   userSettings,
 } from '../db/schema';
-import { and, asc, desc, eq, inArray, isNull, lte, or } from 'drizzle-orm';
-import type { IGetThreadResponse } from './driver/types';
-import { applyGmailChange } from './gmail-mutations';
-import { connectionToDriver } from './server-utils';
 import {
   cancelOutbox,
   listMailboxActivity,
@@ -45,6 +42,10 @@ import {
   recordMailboxAction,
   retryOutbox,
 } from './mailbox-activity';
+import { and, asc, desc, eq, inArray, isNull, lte, or } from 'drizzle-orm';
+import type { IGetThreadResponse } from './driver/types';
+import { applyGmailChange } from './gmail-mutations';
+import { connectionToDriver } from './server-utils';
 import { isValidTimezone } from './timezones';
 import type { ZeroEnv } from '../env';
 import { createDb } from '../db';
@@ -57,6 +58,7 @@ const focusLabelIds = new Map<string, string | null>();
 type Connection = typeof connection.$inferSelect;
 type RuleAction = 'archive' | 'label' | 'important';
 type ScreeningDecision = 'pending' | 'allow' | 'archive' | 'block' | 'spam';
+type SmartFolderSort = 'newest' | 'oldest' | 'sender' | 'domain';
 type BundleInput = {
   name: string;
   deliveryMode: 'immediate' | 'scheduled';
@@ -241,6 +243,86 @@ export class MailboxWorkflows {
     return cancelOutbox(this.env, this.userId, messageId);
   }
 
+  async listSmartFolders() {
+    return this.db.query.smartFolder.findMany({
+      where: eq(smartFolder.userId, this.userId),
+      orderBy: asc(smartFolder.name),
+    });
+  }
+
+  async getSmartFolder(id: string) {
+    const folder = await this.db.query.smartFolder.findFirst({
+      where: and(eq(smartFolder.id, id), eq(smartFolder.userId, this.userId)),
+    });
+    if (!folder) throw new Error('Smart folder not found');
+    return folder;
+  }
+
+  async createSmartFolder(input: {
+    name: string;
+    query: string;
+    connectionId?: string;
+    sort: SmartFolderSort;
+  }) {
+    if (input.connectionId) await this.connection(input.connectionId);
+    const name = input.name.trim();
+    const query = input.query.trim();
+    if (!name || !query) throw new Error('Smart folders require a name and search query');
+    const now = new Date();
+    const [folder] = await this.db
+      .insert(smartFolder)
+      .values({
+        id: crypto.randomUUID(),
+        userId: this.userId,
+        name,
+        query,
+        connectionId: input.connectionId ?? null,
+        sort: input.sort,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning();
+    return folder;
+  }
+
+  async updateSmartFolder(
+    id: string,
+    input: {
+      name?: string;
+      query?: string;
+      connectionId?: string | null;
+      sort?: SmartFolderSort;
+    },
+  ) {
+    await this.getSmartFolder(id);
+    if (input.connectionId) await this.connection(input.connectionId);
+    const name = input.name?.trim();
+    const query = input.query?.trim();
+    if (input.name !== undefined && !name) throw new Error('Smart folder name is required');
+    if (input.query !== undefined && !query) throw new Error('Smart folder query is required');
+    const [folder] = await this.db
+      .update(smartFolder)
+      .set({
+        ...(name !== undefined ? { name } : {}),
+        ...(query !== undefined ? { query } : {}),
+        ...(input.connectionId !== undefined ? { connectionId: input.connectionId } : {}),
+        ...(input.sort !== undefined ? { sort: input.sort } : {}),
+        updatedAt: new Date(),
+      })
+      .where(and(eq(smartFolder.id, id), eq(smartFolder.userId, this.userId)))
+      .returning();
+    if (!folder) throw new Error('Smart folder not found');
+    return folder;
+  }
+
+  async deleteSmartFolder(id: string) {
+    const rows = await this.db
+      .delete(smartFolder)
+      .where(and(eq(smartFolder.id, id), eq(smartFolder.userId, this.userId)))
+      .returning({ id: smartFolder.id });
+    return rows.length > 0;
+  }
+
   async listCleanupCandidates(connectionId?: string) {
     if (connectionId) await this.connection(connectionId);
     const mailboxes = await this.db.query.connection.findMany({
@@ -404,9 +486,9 @@ export class MailboxWorkflows {
       const ids = [...threadIds];
       for (let offset = 0; offset < ids.length; offset += 4) {
         await Promise.all(
-          ids.slice(offset, offset + 4).map((threadId) =>
-            mutateAndReconcile(this.env, mailbox, threadId, change),
-          ),
+          ids
+            .slice(offset, offset + 4)
+            .map((threadId) => mutateAndReconcile(this.env, mailbox, threadId, change)),
         );
       }
       await this.db
@@ -1609,7 +1691,10 @@ async function processCleanupRules(env: ZeroEnv, now: Date) {
   const rules = await db.query.cleanupRule.findMany({
     where: and(
       eq(cleanupRule.enabled, true),
-      or(isNull(cleanupRule.lastRunAt), lte(cleanupRule.lastRunAt, new Date(now.getTime() - 86_400_000))),
+      or(
+        isNull(cleanupRule.lastRunAt),
+        lte(cleanupRule.lastRunAt, new Date(now.getTime() - 86_400_000)),
+      ),
     ),
     orderBy: asc(cleanupRule.lastRunAt),
     limit: 50,

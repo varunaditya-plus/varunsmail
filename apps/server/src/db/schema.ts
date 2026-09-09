@@ -434,10 +434,7 @@ export const senderScreenedThread = createTable(
       .default(sql`(unixepoch() * 1000)`),
   },
   (t) => [
-    unique('mail0_sender_screened_thread_connection_thread_unique').on(
-      t.connectionId,
-      t.threadId,
-    ),
+    unique('mail0_sender_screened_thread_connection_thread_unique').on(t.connectionId, t.threadId),
     index('mail0_sender_screened_thread_decision_idx').on(t.senderDecisionId),
   ],
 );
@@ -528,9 +525,7 @@ export const bundleMatcher = createTable(
       .notNull()
       .references(() => mailBundle.id, { onDelete: 'cascade' }),
     connectionId: text('connection_id').references(() => connection.id, { onDelete: 'cascade' }),
-    kind: text('kind')
-      .$type<'newsletter' | 'receipt' | 'notification' | 'sender'>()
-      .notNull(),
+    kind: text('kind').$type<'newsletter' | 'receipt' | 'notification' | 'sender'>().notNull(),
     value: text('value'),
     createdAt: integer('created_at', { mode: 'timestamp_ms' })
       .notNull()
@@ -669,6 +664,31 @@ export const cleanupRule = createTable(
     ),
     index('mail0_cleanup_rule_due_idx').on(t.enabled, t.lastRunAt),
     index('mail0_cleanup_rule_user_idx').on(t.userId, t.connectionId),
+  ],
+);
+
+export const smartFolder = createTable(
+  'smart_folder',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    query: text('query').notNull(),
+    connectionId: text('connection_id').references(() => connection.id, { onDelete: 'cascade' }),
+    sort: text('sort').$type<'newest' | 'oldest' | 'sender' | 'domain'>().notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+  },
+  (t) => [
+    unique('mail0_smart_folder_user_name_unique').on(t.userId, t.name),
+    index('mail0_smart_folder_user_idx').on(t.userId, t.createdAt),
+    index('mail0_smart_folder_connection_idx').on(t.connectionId),
   ],
 );
 
