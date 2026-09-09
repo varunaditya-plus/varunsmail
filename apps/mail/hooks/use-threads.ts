@@ -76,10 +76,10 @@ export const useThreads = () => {
         enabled: isUnifiedInbox && isSmartFolderReady,
         initialCursor: '',
         getNextPageParam: (lastPage) => lastPage?.nextPageToken ?? null,
-        staleTime: 60 * 1000,
-        refetchOnMount: true,
-        refetchInterval: 60 * 1000,
-        refetchIntervalInBackground: true,
+        staleTime: 5 * 60 * 1000,
+        refetchOnMount: false,
+        refetchInterval: 5 * 60 * 1000,
+        refetchIntervalInBackground: false,
       },
     ),
   );
@@ -102,9 +102,9 @@ export const useThreads = () => {
           !!connectionId,
         initialCursor: '',
         getNextPageParam: (lastPage) => lastPage?.nextPageToken ?? null,
-        staleTime: 60 * 1000 * 1, // 1 minute
-        refetchOnMount: true,
-        refetchIntervalInBackground: true,
+        staleTime: 5 * 60 * 1000,
+        refetchOnMount: false,
+        refetchIntervalInBackground: false,
       },
     ),
   );

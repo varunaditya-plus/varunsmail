@@ -51,7 +51,10 @@ export const makeQueryClient = (connectionId: string | null) =>
     defaultOptions: {
       queries: {
         retry: false,
+        staleTime: 1000 * 60 * 5,
         refetchOnWindowFocus: false,
+        refetchOnMount: false,
+        refetchOnReconnect: false,
         queryKeyHashFn: (queryKey) => hashKey([{ connectionId }, ...queryKey]),
         gcTime: 1000 * 60 * 60 * 24, // 24 hours,
       },
@@ -61,24 +64,16 @@ export const makeQueryClient = (connectionId: string | null) =>
     },
   });
 
-let browserQueryClient = {
-  queryClient: null,
-  activeConnectionId: null,
-} as {
-  queryClient: QueryClient | null;
-  activeConnectionId: string | null;
-};
+const browserQueryClients = new Map<string, QueryClient>();
 
 const getQueryClient = (connectionId: string | null) => {
-  if (typeof window === 'undefined') {
-    return makeQueryClient(connectionId);
-  } else {
-    if (!browserQueryClient.queryClient || browserQueryClient.activeConnectionId !== connectionId) {
-      browserQueryClient.queryClient = makeQueryClient(connectionId);
-      browserQueryClient.activeConnectionId = connectionId;
-    }
-    return browserQueryClient.queryClient;
-  }
+  if (typeof window === 'undefined') return makeQueryClient(connectionId);
+  const key = connectionId ?? 'default';
+  const existing = browserQueryClients.get(key);
+  if (existing) return existing;
+  const queryClient = makeQueryClient(connectionId);
+  browserQueryClients.set(key, queryClient);
+  return queryClient;
 };
 
 const getUrl = () => import.meta.env.VITE_PUBLIC_BACKEND_URL + '/api/trpc';
@@ -92,7 +87,7 @@ export const trpcClient = createTRPCClient<AppRouter>({
       transformer: superjson,
       url: getUrl(),
       methodOverride: 'POST',
-      maxItems: 1,
+      maxItems: 10,
       fetch: (url, options) =>
         fetch(url, { ...options, credentials: 'include' }).then((res) => {
           const currentPath = new URL(window.location.href).pathname;
@@ -141,8 +136,6 @@ export function QueryProvider({
             };
           },
         );
-        // invalidate the query, it will refetch when the data is it is being accessed
-        queryClient.invalidateQueries({ queryKey: threadQueryKey });
       }}
     >
       <TRPCProvider trpcClient={trpcClient} queryClient={queryClient}>

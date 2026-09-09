@@ -27,7 +27,7 @@ type NotificationSettings = {
 
 const SEEN_THREADS_KEY = 'varunsmail-notified-threads';
 const PERMISSION_CHANGE_EVENT = 'varunsmail-notification-permission-change';
-const POLL_INTERVAL = 60 * 1000;
+const POLL_INTERVAL = 5 * 60 * 1000;
 const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 function readSeenThreads() {
@@ -120,9 +120,9 @@ export function MailNotifications() {
           permission === 'granted' &&
           !!settings &&
           settings.newMailNotifications !== 'none',
-        staleTime: 0,
+        staleTime: POLL_INTERVAL,
         refetchInterval: POLL_INTERVAL,
-        refetchIntervalInBackground: true,
+        refetchIntervalInBackground: false,
       },
     ),
   );
