@@ -83,13 +83,16 @@ export function Layout({ children }: PropsWithChildren) {
   );
 }
 
-// export function HydrateFallback() {
-//   return (
-//     <div className="flex h-screen w-full items-center justify-center">
-//       <Loader2 className="h-10 w-10 animate-spin" />
-//     </div>
-//   );
-// }
+export function HydrateFallback() {
+  return (
+    <div className="bg-background text-muted-foreground flex min-h-svh w-full items-center justify-center">
+      <div
+        className="h-5 w-5 animate-spin rounded-full border-2 border-current border-t-transparent"
+        aria-label="Loading mail"
+      />
+    </div>
+  );
+}
 
 export default function App() {
   return <Outlet />;

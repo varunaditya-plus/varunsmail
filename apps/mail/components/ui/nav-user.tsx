@@ -21,7 +21,6 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useDoState } from '@/components/mail/use-do-state';
-import { useLoading } from '../context/loading-context';
 import { signOut, useSession } from '@/lib/auth-client';
 import { AddConnectionDialog } from '../connection/add';
 import { CircleCheck, ThreeDots } from '../icons/icons';
@@ -29,7 +28,7 @@ import { useTRPC } from '@/providers/query-provider';
 import { useSidebar } from '@/components/ui/sidebar';
 import { SunIcon } from '../icons/animated/sun';
 import { clear as idbClear } from 'idb-keyval';
-import { useLocation } from 'react-router';
+import { useLocation, useNavigate } from 'react-router';
 import { m } from '@/paraglide/messages';
 import { useTheme } from 'next-themes';
 import { useQueryState } from 'nuqs';
@@ -97,12 +96,12 @@ export function NavUser() {
   );
   const { mutateAsync: handleForceSync } = useMutation(trpc.mail.forceSync.mutationOptions());
   const pathname = useLocation().pathname;
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { data: activeConnection, refetch: refetchActiveConnection } = useActiveConnection();
   const { mailbox: aliasMailbox, isActive: isAliasMailboxActive } = useAliasMailbox();
   const isEnsuringAliasSourceRef = useRef(false);
   const [category] = useQueryState('category', { defaultValue: 'All Mail' });
-  const { setLoading } = useLoading();
   const [{ isSyncing, syncingFolders, storageSize, shards }] = useDoState();
 
   const getSettingsHref = useCallback(() => {
@@ -163,24 +162,31 @@ export function NavUser() {
     const connectionId = isAliasAccount ? account.sourceConnectionId : account.id;
 
     try {
-      setLoading(true, m['common.navUser.switchingAccounts']());
-      setThreadId(null);
       if (connectionId !== activeConnection?.id) await setDefaultConnection({ connectionId });
-      queryClient.clear();
-      if (isAliasAccount) {
-        window.location.href = `/mail/inbox?mailbox=${encodeURIComponent(account.viewId)}`;
-      } else if (isAliasMailboxActive) {
-        window.location.href = pathname;
-      } else {
-        await queryClient.refetchQueries({ queryKey: trpc.mail.listThreads.infiniteQueryKey() });
+
+      const nextConnection = data?.connections.find((connection) => connection.id === connectionId);
+      if (nextConnection) {
+        queryClient.setQueryData(trpc.connections.getDefault.queryKey(), nextConnection);
       }
+
+      if (isAliasAccount) {
+        navigate(`/mail/inbox?mailbox=${encodeURIComponent(account.viewId)}`);
+      } else if (isAliasMailboxActive) {
+        navigate(pathname);
+      } else {
+        await setThreadId(null);
+      }
+
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: trpc.mail.listThreads.pathKey() }),
+        queryClient.invalidateQueries({ queryKey: trpc.labels.list.pathKey() }),
+        queryClient.invalidateQueries({ queryKey: trpc.drafts.list.pathKey() }),
+      ]);
     } catch (error) {
       console.error('Error switching accounts:', error);
       toast.error(m['common.navUser.failedToSwitchAccount']());
 
       await refetchActiveConnection();
-    } finally {
-      setLoading(false);
     }
   };
 
