@@ -21,6 +21,7 @@ export type GmailHistoryRecord = {
 export type GmailPollState = {
   historyId: string;
   historyPageToken?: string;
+  lastHistoryAt?: number;
   backfill?: { phase: 'mailbox' | 'cache'; pageToken?: string };
 };
 
@@ -179,8 +180,12 @@ export async function pollGmailChanges(options: {
   enqueue: (jobs: GmailPollJob[]) => Promise<void>;
   enqueueHistory?: (jobs: GmailPollJob[]) => Promise<void>;
   canBackfill?: () => Promise<boolean>;
+  historyIntervalMs?: number;
+  now?: () => number;
 }) {
   let state = await options.readState();
+  const now = (options.now ?? Date.now)();
+  const historyIntervalMs = options.historyIntervalMs ?? 5 * 60 * 1000;
   const enqueue = async (jobs: GmailPollJob[], history = false) => {
     for (let offset = 0; offset < jobs.length; offset += 100) {
       await (history ? (options.enqueueHistory ?? options.enqueue) : options.enqueue)(
@@ -191,13 +196,17 @@ export async function pollGmailChanges(options: {
   const beginBackfill = async (): Promise<GmailPollState> => {
     const { historyId } = await options.profile();
     if (!historyId) throw new Error('Gmail did not return a history cursor');
-    return { historyId, backfill: { phase: 'mailbox' } };
+    return { historyId, lastHistoryAt: now, backfill: { phase: 'mailbox' } };
   };
 
   if (!state) {
     state = await beginBackfill();
-  } else {
-    // Bound each minute's work; a saved page token resumes a large change burst.
+  } else if (
+    state.historyPageToken ||
+    !state.lastHistoryAt ||
+    now - state.lastHistoryAt >= historyIntervalMs
+  ) {
+    // Bound each run's work; a saved page token resumes a large change burst.
     for (let page = 0; page < 5; page++) {
       let response;
       try {
@@ -218,6 +227,7 @@ export async function pollGmailChanges(options: {
           ? state.historyId
           : (response.historyId ?? state.historyId),
         historyPageToken: response.nextPageToken,
+        lastHistoryAt: response.nextPageToken ? state.lastHistoryAt : now,
       };
       // Queue acceptance precedes the checkpoint; interrupted work can be replayed safely.
       await options.saveState(state);

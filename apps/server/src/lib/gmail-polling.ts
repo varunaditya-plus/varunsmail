@@ -207,22 +207,31 @@ export async function refreshPolledThread(
   const cached = await env.THREADS_BUCKET.get(threadKey);
   const previous = cached ? await cached.json<IGetThreadResponse>() : undefined;
   let deleted = false;
-  let metadata: GmailThreadMetadata = {};
   let internalDates = new Map<string, string>();
-  try {
-    const rawThread = await request<GmailThreadMetadata>(
-      `threads/${encodeURIComponent(job.threadId)}`,
-      { format: 'minimal' },
-    );
-    metadata = rawThread;
-    internalDates = new Map(
-      rawThread.messages
-        ?.filter((message) => message.internalDate)
-        .map(({ id, internalDate }) => [id, internalDate!]),
-    );
-  } catch (error) {
-    if (!(error instanceof GmailPollError) || error.status !== 404) throw error;
-    deleted = true;
+  let refreshed: IGetThreadResponse | undefined;
+  if (previous) {
+    try {
+      const metadata = await request<GmailThreadMetadata>(
+        `threads/${encodeURIComponent(job.threadId)}`,
+        { format: 'minimal' },
+      );
+      internalDates = new Map(
+        metadata.messages
+          ?.filter((message) => message.internalDate)
+          .map(({ id, internalDate }) => [id, internalDate!]),
+      );
+      refreshed = refreshGmailMetadata(previous, metadata);
+    } catch (error) {
+      if (!(error instanceof GmailPollError) || error.status !== 404) throw error;
+      deleted = true;
+    }
+  } else {
+    try {
+      refreshed = await connectionToDriver(mailbox).get(job.threadId);
+    } catch (error) {
+      if (gmailPollFailure(error).status !== 404) throw error;
+      deleted = true;
+    }
   }
 
   const active = await getZeroAgent(job.connectionId);
@@ -286,8 +295,7 @@ export async function refreshPolledThread(
   } else {
     const thread = applyLocalSnooze(
       normalizeGmailThread(
-        refreshGmailMetadata(previous, metadata) ??
-          (await connectionToDriver(mailbox).get(job.threadId)),
+        refreshed ?? (await connectionToDriver(mailbox).get(job.threadId)),
         job.connectionId,
         job.threadId,
         internalDates,

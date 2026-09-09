@@ -29,16 +29,11 @@ export async function listMailboxThreads(
 ): Promise<IGetThreadsResponse> {
   const { folder, q, cursor, maxResults, labelIds } = input;
   const liveCursor = cursor.startsWith('gmail:');
-  if (folder !== 'snoozed') {
+  if (liveCursor) {
     const response = await sources.live({
       folder,
       query: q,
-      // A timestamp from the old local cache is not a Gmail page token.
-      pageToken: liveCursor
-        ? cursor.slice('gmail:'.length)
-        : /^\d{4}-\d{2}-\d{2}T/.test(cursor)
-          ? undefined
-          : cursor || undefined,
+      pageToken: cursor.slice('gmail:'.length),
       maxResults,
       labelIds,
     });
@@ -47,11 +42,20 @@ export async function listMailboxThreads(
       nextPageToken: response.nextPageToken ? `gmail:${response.nextPageToken}` : null,
     };
   }
-  return sources.cache({
+
+  const cached = await sources.cache({
     folder,
-    pageToken: liveCursor ? '' : cursor,
+    pageToken: cursor,
     maxResults,
     labelIds,
     ...(q ? { q } : {}),
   });
+  if (cached.threads.length || cursor || folder !== 'inbox' || q || labelIds.length) return cached;
+
+  // A newly connected mailbox may not have produced its first cached page yet.
+  const response = await sources.live({ folder, query: q, maxResults, labelIds });
+  return {
+    ...response,
+    nextPageToken: response.nextPageToken ? `gmail:${response.nextPageToken}` : null,
+  };
 }
