@@ -138,17 +138,13 @@ export function NavUser() {
 
     isEnsuringAliasSourceRef.current = true;
     void setDefaultConnection({ connectionId: aliasMailbox.sourceConnectionId })
-      .then(async () => {
-        queryClient.clear();
-        await idbClear();
-        window.location.reload();
-      })
+      .then(() => refetchActiveConnection())
       .catch((error) => {
         isEnsuringAliasSourceRef.current = false;
         console.error('Error opening custom mailbox:', error);
         toast.error('Failed to open custom mailbox');
       });
-  }, [activeConnection, aliasMailbox, isAliasMailboxActive, queryClient, setDefaultConnection]);
+  }, [activeConnection, aliasMailbox, isAliasMailboxActive, refetchActiveConnection, setDefaultConnection]);
 
   const mailboxAccounts = useMemo(
     () => [...(data?.connections ?? []), ...(aliasMailbox ? [aliasMailbox] : [])],
