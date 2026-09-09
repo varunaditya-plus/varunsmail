@@ -8,17 +8,17 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { Bell, Lightning, Mail, ScanEye, Tag, User, X, Search } from '../icons/icons';
 import { useCategorySettings, useDefaultCategoryId } from '@/hooks/use-categories';
 import { ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
-import { ArrowUpDown, Check, ChevronDown, RefreshCcw } from 'lucide-react';
 import { useCommandPalette } from '../context/command-palette-context';
 import { useHotkeys, useHotkeysContext } from 'react-hotkeys-hook';
 import { ThreadDisplay } from '@/components/mail/thread-display';
-import { AccountFilter } from '@/components/mail/account-filter';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useActiveConnection } from '@/hooks/use-connections';
+import { ArrowUpDown, Check, ChevronDown, RefreshCcw } from 'lucide-react';
 import { useMediaQuery } from '../../hooks/use-media-query';
 import useSearchLabels from '@/hooks/use-labels-search';
 import * as CustomIcons from '@/components/icons/icons';
 import { MailList } from '@/components/mail/mail-list';
+import { AccountFilter } from '@/components/mail/account-filter';
 import { useNavigate, useParams } from 'react-router';
 import { useMail } from '@/components/mail/use-mail';
 import { SidebarToggle } from '../ui/sidebar-toggle';
@@ -504,12 +504,7 @@ export function MailLayout() {
                             ['domain', 'Sender domain'],
                           ].map(([value, label]) => (
                             <DropdownMenuItem key={value} onSelect={() => void setSort(value)}>
-                              <Check
-                                className={cn(
-                                  'mr-2 h-4 w-4',
-                                  activeSort === value ? 'opacity-100' : 'opacity-0',
-                                )}
-                              />
+                              <Check className={cn('mr-2 h-4 w-4', activeSort === value ? 'opacity-100' : 'opacity-0')} />
                               {label}
                             </DropdownMenuItem>
                           ))}
@@ -548,7 +543,7 @@ export function MailLayout() {
                     onClick={handleRefetchThreads}
                     variant="ghost"
                     size="icon"
-                    className="hover:bg-accent/50 h-10 w-10 rounded-lg border-none bg-transparent backdrop-blur-sm"
+                    className="border-none bg-transparent hover:bg-accent/50 h-10 w-10 rounded-lg backdrop-blur-sm"
                   >
                     <RefreshCcw className="text-muted-foreground h-4 w-4" />
                   </Button>

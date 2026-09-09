@@ -434,7 +434,10 @@ export const senderScreenedThread = createTable(
       .default(sql`(unixepoch() * 1000)`),
   },
   (t) => [
-    unique('mail0_sender_screened_thread_connection_thread_unique').on(t.connectionId, t.threadId),
+    unique('mail0_sender_screened_thread_connection_thread_unique').on(
+      t.connectionId,
+      t.threadId,
+    ),
     index('mail0_sender_screened_thread_decision_idx').on(t.senderDecisionId),
   ],
 );
@@ -525,7 +528,9 @@ export const bundleMatcher = createTable(
       .notNull()
       .references(() => mailBundle.id, { onDelete: 'cascade' }),
     connectionId: text('connection_id').references(() => connection.id, { onDelete: 'cascade' }),
-    kind: text('kind').$type<'newsletter' | 'receipt' | 'notification' | 'sender'>().notNull(),
+    kind: text('kind')
+      .$type<'newsletter' | 'receipt' | 'notification' | 'sender'>()
+      .notNull(),
     value: text('value'),
     createdAt: integer('created_at', { mode: 'timestamp_ms' })
       .notNull()

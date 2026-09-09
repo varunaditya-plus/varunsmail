@@ -11,20 +11,20 @@ import { useTRPC } from '@/providers/query-provider';
 import { useSidebar } from '@/components/ui/sidebar';
 import { CreateEmail } from '../create/create-email';
 import { useQuery } from '@tanstack/react-query';
-import { useIsMobile } from '@/hooks/use-mobile';
-import { useSession } from '@/lib/auth-client';
 import { PencilCompose } from '../icons/icons';
+import { useIsMobile } from '@/hooks/use-mobile';
+import React, { useMemo } from 'react';
+import { useSession } from '@/lib/auth-client';
 import { useAIFullScreen } from './ai-sidebar';
 import { useStats } from '@/hooks/use-stats';
-import { FolderSearch } from 'lucide-react';
 import { useLocation } from 'react-router';
 import { cn, FOLDERS } from '@/lib/utils';
 import { m } from '@/paraglide/messages';
-import React, { useMemo } from 'react';
 // import { Video } from 'lucide-react';
 import { NavUser } from './nav-user';
 import { NavMain } from './nav-main';
 import { useQueryState } from 'nuqs';
+import { FolderSearch } from 'lucide-react';
 // import { toast } from 'sonner';
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
@@ -54,11 +54,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         const core = items.find((section) => section.title === 'Core');
         const inbox = core?.items.find((item) => item.id === 'inbox');
         const sent = core?.items.find((item) => item.id === 'sent');
-        if (inbox)
-          inbox.badge =
-            stats.find((stat) => stat.label?.toLowerCase() === FOLDERS.INBOX)?.count ?? 0;
-        if (sent)
-          sent.badge = stats.find((stat) => stat.label?.toLowerCase() === FOLDERS.SENT)?.count ?? 0;
+        if (inbox) inbox.badge = stats.find((stat) => stat.label?.toLowerCase() === FOLDERS.INBOX)?.count ?? 0;
+        if (sent) sent.badge = stats.find((stat) => stat.label?.toLowerCase() === FOLDERS.SENT)?.count ?? 0;
       }
 
       if (currentSection === 'mail' && smartFolders?.folders.length) {
@@ -171,10 +168,7 @@ function ComposeButton() {
       <DialogDescription></DialogDescription>
 
       <DialogTrigger asChild>
-        <button
-          type="button"
-          className="relative mb-1.5 inline-flex h-8 w-full cursor-pointer items-center justify-center gap-1 self-stretch overflow-hidden rounded-lg border border-gray-200 bg-[#006FFE] text-black transition-colors hover:bg-[#0056CC] dark:border-none dark:text-white dark:hover:bg-[#0056CC]"
-        >
+        <button type="button" className="relative mb-1.5 inline-flex h-8 w-full items-center justify-center gap-1 self-stretch overflow-hidden rounded-lg border border-gray-200 bg-[#006FFE] text-black dark:border-none dark:text-white cursor-pointer hover:bg-[#0056CC] dark:hover:bg-[#0056CC] transition-colors">
           {state === 'collapsed' && !isMobile ? (
             <PencilCompose className="mt-0.5 fill-white text-black" />
           ) : (
