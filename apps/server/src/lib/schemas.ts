@@ -114,6 +114,12 @@ export const userSettingsSchema = z.object({
   imageCompression: z.enum(['low', 'medium', 'original']).default('medium'),
   autoRead: z.boolean().default(true),
   animations: z.boolean().default(false),
+  newMailNotifications: z.enum(['none', 'important', 'all']).default('important'),
+  priorityNotificationSenders: z.string().array().default([]),
+  quietHoursEnabled: z.boolean().default(false),
+  quietHoursStart: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/).default('22:00'),
+  quietHoursEnd: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/).default('07:00'),
+  notificationTimezone: z.string().optional(),
 });
 
 export type UserSettings = z.infer<typeof userSettingsSchema>;
@@ -135,4 +141,9 @@ export const defaultUserSettings: UserSettings = {
   undoSendEnabled: false,
   imageCompression: 'medium',
   animations: false,
+  newMailNotifications: 'important',
+  priorityNotificationSenders: [],
+  quietHoursEnabled: false,
+  quietHoursStart: '22:00',
+  quietHoursEnd: '07:00',
 };

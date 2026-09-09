@@ -130,6 +130,9 @@ export interface ThreadListItem {
   subject?: string;
   senderEmail?: string;
   senderName?: string;
+  latestMessageId?: string;
+  hasUnread?: boolean;
+  labels?: string[];
   account?: {
     id: string;
     email: string;
@@ -156,6 +159,9 @@ export const IGetThreadsResponseSchema = z.object({
       subject: z.string().optional(),
       senderEmail: z.string().optional(),
       senderName: z.string().optional(),
+      latestMessageId: z.string().optional(),
+      hasUnread: z.boolean().optional(),
+      labels: z.array(z.string()).optional(),
       account: z
         .object({
           id: z.string(),

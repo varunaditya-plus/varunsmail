@@ -17,6 +17,7 @@ import {
 } from '@/components/icons/icons';
 import {
   Activity,
+  Bell,
   Brush,
   FolderSearch,
   ListFilter,
@@ -232,6 +233,11 @@ export const navigationConfig: Record<string, NavConfig> = {
             title: m['navigation.settings.privacy'](),
             url: '/settings/privacy',
             icon: LockIcon,
+          },
+          {
+            title: 'Notifications',
+            url: '/settings/notifications',
+            icon: Bell,
           },
           {
             title: m['navigation.settings.appearance'](),

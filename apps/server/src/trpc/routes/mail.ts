@@ -76,6 +76,9 @@ async function enrichThreadList(connectionId: string, threads: ThreadListItem[])
         subject: latest?.subject,
         senderEmail: latest?.sender.email,
         senderName: latest?.sender.name,
+        latestMessageId: latest?.id,
+        hasUnread: cached.hasUnread,
+        labels: [...new Set(cached.labels.map(({ id }) => id).concat(latest?.tags.map(({ id }) => id) ?? []))],
       };
     } catch (error) {
       console.warn('[mail] Could not enrich cached thread', connectionId, thread.id, error);
