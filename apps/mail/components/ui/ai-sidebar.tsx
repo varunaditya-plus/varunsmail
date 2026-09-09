@@ -241,7 +241,7 @@ export function useAISidebar() {
   const setViewMode = useCallback(
     (mode: ViewMode) => {
       setViewModeState(mode);
-      setViewModeQuery(mode === 'popup' ? null : mode);
+      setViewModeQuery(mode);
 
       // Save to localStorage for persistence across sessions
       if (typeof window !== 'undefined') {
