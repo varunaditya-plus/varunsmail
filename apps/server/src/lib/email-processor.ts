@@ -9,10 +9,123 @@ interface ProcessEmailOptions {
   html: string;
   shouldLoadImages: boolean;
   theme: 'light' | 'dark';
+  trackingProtection?: boolean;
+}
+
+function parseHttpUrl(value: string) {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url : null;
+  } catch {
+    return null;
+  }
+}
+
+function isKnownTrackingUrl(value: string) {
+  const url = parseHttpUrl(value);
+  if (!url) return false;
+
+  const host = url.hostname.toLowerCase();
+  const path = url.pathname.toLowerCase();
+
+  return (
+    ((host === 'mandrillapp.com' || host.endsWith('.mandrillapp.com')) &&
+      path.startsWith('/track/open')) ||
+    (host.endsWith('.list-manage.com') && path.startsWith('/track/open')) ||
+    (host.endsWith('.sendgrid.net') && path.startsWith('/wf/open')) ||
+    ((host === 'track.hubspot.com' || host.endsWith('.track.hubspot.com')) &&
+      path === '/__ptq.gif') ||
+    ((host === 'www.google-analytics.com' || host === 'google-analytics.com') &&
+      path === '/collect') ||
+    ((host === 'www.facebook.com' || host === 'facebook.com') && path === '/tr') ||
+    (host === 'track.customer.io' && path.startsWith('/e/o/')) ||
+    (host === 'pstmrk.it' && path.startsWith('/open')) ||
+    ((host.endsWith('.mailgun.org') || host.endsWith('.mailgun.net')) && path.startsWith('/o/'))
+  );
+}
+
+function isTinyImage(width?: string, height?: string) {
+  if (!width || !height) return false;
+
+  const parseDimension = (value: string) =>
+    Number(value.trim().toLowerCase().endsWith('px') ? value.trim().slice(0, -2) : value);
+  const parsedWidth = parseDimension(width);
+  const parsedHeight = parseDimension(height);
+  return (
+    Number.isFinite(parsedWidth) &&
+    Number.isFinite(parsedHeight) &&
+    parsedWidth >= 0 &&
+    parsedWidth <= 2 &&
+    parsedHeight >= 0 &&
+    parsedHeight <= 2
+  );
+}
+
+function unwrapRedirectUrl(value: string) {
+  const wrapper = parseHttpUrl(value);
+  if (!wrapper) return null;
+
+  const host = wrapper.hostname.toLowerCase();
+  const path = wrapper.pathname.toLowerCase();
+  let destination: string | null = null;
+
+  if ((host === 'google.com' || host === 'www.google.com') && path === '/url') {
+    destination = wrapper.searchParams.get('q') || wrapper.searchParams.get('url');
+  } else if (
+    (host === 'safelinks.protection.outlook.com' ||
+      host.endsWith('.safelinks.protection.outlook.com')) &&
+    path === '/'
+  ) {
+    destination = wrapper.searchParams.get('url');
+  } else if ((host === 'l.facebook.com' || host === 'lm.facebook.com') && path === '/l.php') {
+    destination = wrapper.searchParams.get('u');
+  } else if (
+    (host === 'linkedin.com' || host === 'www.linkedin.com') &&
+    path === '/redir/redirect'
+  ) {
+    destination = wrapper.searchParams.get('url');
+  } else if ((host === 'youtube.com' || host === 'www.youtube.com') && path === '/redirect') {
+    destination = wrapper.searchParams.get('q');
+  }
+
+  // Keep unknown wrappers and non-web destinations intact.
+  const safeDestination = destination && parseHttpUrl(destination);
+  return safeDestination?.toString() || null;
+}
+
+function protectEmailHtml(html: string) {
+  const $ = cheerio.load(html);
+  let blockedTrackerCount = 0;
+
+  $('img').each((_, el) => {
+    const $img = $(el);
+    const src = $img.attr('src') || '';
+    const style = $img.attr('style') || '';
+    const styleWidth = style.match(/(?:^|;)\s*width\s*:\s*([\d.]+)px(?:\s*!important)?/i)?.[1];
+    const styleHeight = style.match(/(?:^|;)\s*height\s*:\s*([\d.]+)px(?:\s*!important)?/i)?.[1];
+
+    if (
+      isTinyImage($img.attr('width'), $img.attr('height')) ||
+      isTinyImage(styleWidth, styleHeight) ||
+      /(?:^|;)\s*(?:display\s*:\s*none|visibility\s*:\s*hidden|opacity\s*:\s*0(?:\.0+)?)\s*(?:!important)?(?:;|$)/i.test(style) ||
+      isKnownTrackingUrl(src)
+    ) {
+      blockedTrackerCount += 1;
+      $img.remove();
+    }
+  });
+
+  $('a[href]').each((_, el) => {
+    const $link = $(el);
+    const destination = unwrapRedirectUrl($link.attr('href') || '');
+    if (destination) $link.attr('href', destination);
+  });
+
+  return { html: $.html(), blockedTrackerCount };
 }
 
 // Server-side: Heavy lifting, preference-independent processing
-export function preprocessEmailHtml(html: string): string {
+function preprocessEmailContent(html: string, trackingProtection: boolean) {
   const sanitizeConfig: sanitizeHtml.IOptions = {
     allowedTags: sanitizeHtml.defaults.allowedTags.concat([
       'img',
@@ -107,8 +220,9 @@ export function preprocessEmailHtml(html: string): string {
 
   // Remove unwanted elements
   $('title').remove();
-  $('img[width="1"][height="1"]').remove();
-  $('img[width="0"][height="0"]').remove();
+  const legacyTrackingPixels = $('img[width="1"][height="1"], img[width="0"][height="0"]');
+  const legacyTrackerCount = trackingProtection ? legacyTrackingPixels.length : 0;
+  legacyTrackingPixels.remove();
 
   // Remove preheader content
   $('.preheader, .preheaderText, [class*="preheader"]').each((_, el) => {
@@ -131,7 +245,17 @@ export function preprocessEmailHtml(html: string): string {
     }
   });
 
-  return $.html();
+  if (!trackingProtection) return { html: $.html(), blockedTrackerCount: 0 };
+
+  const protectedContent = protectEmailHtml($.html());
+  return {
+    ...protectedContent,
+    blockedTrackerCount: legacyTrackerCount + protectedContent.blockedTrackerCount,
+  };
+}
+
+export function preprocessEmailHtml(html: string): string {
+  return preprocessEmailContent(html, false).html;
 }
 
 // Client-side: Light styling + image preferences
@@ -139,11 +263,15 @@ export function applyEmailPreferences(
   preprocessedHtml: string,
   theme: 'light' | 'dark',
   shouldLoadImages: boolean,
-): { processedHtml: string; hasBlockedImages: boolean } {
+  trackingProtection = false,
+): { processedHtml: string; hasBlockedImages: boolean; blockedTrackerCount: number } {
   let hasBlockedImages = false;
   const isDarkTheme = theme === 'dark';
 
-  const $ = cheerio.load(preprocessedHtml);
+  const protectedContent = trackingProtection
+    ? protectEmailHtml(preprocessedHtml)
+    : { html: preprocessedHtml, blockedTrackerCount: 0 };
+  const $ = cheerio.load(protectedContent.html);
 
   // Handle image blocking if needed
   if (!shouldLoadImages) {
@@ -224,14 +352,26 @@ export function applyEmailPreferences(
   return {
     processedHtml: finalHtml,
     hasBlockedImages,
+    blockedTrackerCount: protectedContent.blockedTrackerCount,
   };
 }
 
 // Original function for backward compatibility
-export function processEmailHtml({ html, shouldLoadImages, theme }: ProcessEmailOptions): {
+export function processEmailHtml({
+  html,
+  shouldLoadImages,
+  theme,
+  trackingProtection = false,
+}: ProcessEmailOptions): {
   processedHtml: string;
   hasBlockedImages: boolean;
+  blockedTrackerCount: number;
 } {
-  const preprocessed = preprocessEmailHtml(html);
-  return applyEmailPreferences(preprocessed, theme, shouldLoadImages);
+  const preprocessed = preprocessEmailContent(html, trackingProtection);
+  const processed = applyEmailPreferences(preprocessed.html, theme, shouldLoadImages);
+
+  return {
+    ...processed,
+    blockedTrackerCount: preprocessed.blockedTrackerCount,
+  };
 }

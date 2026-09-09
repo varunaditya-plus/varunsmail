@@ -67,17 +67,25 @@ export function MailContent({ id, html, senderEmail }: MailContentProps) {
   );
 
   const { data: processedData } = useQuery({
-    queryKey: ['email-content', id, isTrustedSender || temporaryImagesEnabled, resolvedTheme],
+    queryKey: [
+      'email-content',
+      id,
+      isTrustedSender || temporaryImagesEnabled,
+      data?.settings.trackingProtection,
+      resolvedTheme,
+    ],
     queryFn: async () => {
       const result = await processEmailContent({
         html,
         shouldLoadImages: isTrustedSender || temporaryImagesEnabled,
         theme: (resolvedTheme as 'light' | 'dark') || 'light',
+        trackingProtection: data?.settings.trackingProtection ?? true,
       });
 
       return {
         html: result.processedHtml,
         hasBlockedImages: result.hasBlockedImages,
+        blockedTrackerCount: result.blockedTrackerCount,
       };
     },
     staleTime: 30 * 60 * 1000,
@@ -156,6 +164,12 @@ export function MailContent({ id, html, senderEmail }: MailContentProps) {
 
   return (
     <>
+      {!!processedData?.blockedTrackerCount && (
+        <div className="bg-muted/50 text-muted-foreground px-2 py-1 text-sm">
+          {processedData.blockedTrackerCount}{' '}
+          {processedData.blockedTrackerCount === 1 ? 'tracker' : 'trackers'} blocked
+        </div>
+      )}
       {cspViolation && !isTrustedSender && !data?.settings?.externalImages && (
         <div className="flex items-center justify-start bg-amber-600/20 px-2 py-1 text-sm text-amber-600">
           <p>{m['common.actions.hiddenImagesWarning']()}</p>

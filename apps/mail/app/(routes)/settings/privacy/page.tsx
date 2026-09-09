@@ -81,6 +81,23 @@ export default function PrivacyPage() {
             <div className="flex w-full flex-col items-start gap-5">
               <FormField
                 control={form.control}
+                name="trackingProtection"
+                render={({ field }) => (
+                  <FormItem className="bg-popover flex w-full flex-row items-center justify-between rounded-lg border p-4 md:w-auto">
+                    <div className="space-y-0.5">
+                      <FormLabel className="text-base">Tracking protection</FormLabel>
+                      <FormDescription>
+                        Remove tracking pixels and unwrap supported redirect links in messages.
+                      </FormDescription>
+                    </div>
+                    <FormControl className="ml-4">
+                      <Switch checked={field.value} onCheckedChange={field.onChange} />
+                    </FormControl>
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
                 name="externalImages"
                 render={({ field }) => (
                   <FormItem className="bg-popover flex w-full flex-row items-center justify-between rounded-lg border p-4 md:w-auto">

@@ -242,6 +242,7 @@ export const useThread = (threadId: string | null, connectionId?: string | null)
       'email-content',
       latestMessage?.id,
       shouldLoadImages,
+      settings?.settings.trackingProtection,
       systemTheme,
     ],
     queryFn: async () => {
@@ -255,11 +256,13 @@ export const useThread = (threadId: string | null, connectionId?: string | null)
         html: latestMessage.decodedBody,
         shouldLoadImages,
         theme,
+        trackingProtection: settings.settings.trackingProtection,
       });
 
       return {
         html: result.processedHtml,
         hasBlockedImages: result.hasBlockedImages,
+        blockedTrackerCount: result.blockedTrackerCount,
       };
     },
     enabled: !!latestMessage?.decodedBody && !!settings?.settings,

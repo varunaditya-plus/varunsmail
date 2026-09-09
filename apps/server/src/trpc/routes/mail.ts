@@ -915,19 +915,22 @@ export const mailRouter = router({
         html: z.string(),
         shouldLoadImages: z.boolean(),
         theme: z.enum(['light', 'dark']),
+        trackingProtection: z.boolean().optional().default(true),
       }),
     )
     .mutation(async ({ input }) => {
       try {
-        const { processedHtml, hasBlockedImages } = processEmailHtml({
+        const { processedHtml, hasBlockedImages, blockedTrackerCount } = processEmailHtml({
           html: input.html,
           shouldLoadImages: input.shouldLoadImages,
           theme: input.theme,
+          trackingProtection: input.trackingProtection,
         });
 
         return {
           processedHtml,
           hasBlockedImages,
+          blockedTrackerCount,
         };
       } catch (error) {
         console.error('Error processing email content:', error);
