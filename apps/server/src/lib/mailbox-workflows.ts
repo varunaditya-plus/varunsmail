@@ -47,6 +47,7 @@ import {
   retryOutbox,
 } from './mailbox-activity';
 import { isValidTimezone } from './timezones';
+import { listMailboxAssets, type ListMailboxAssetsInput } from './mailbox-assets';
 import type { ZeroEnv } from '../env';
 import { createDb } from '../db';
 
@@ -241,6 +242,10 @@ export class MailboxWorkflows {
 
   async cancelOutbox(messageId: string) {
     return cancelOutbox(this.env, this.userId, messageId);
+  }
+
+  async listAssets(input: ListMailboxAssetsInput) {
+    return listMailboxAssets(this.env, this.userId, input);
   }
 
   async listSmartFolders() {

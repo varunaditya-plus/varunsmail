@@ -8,6 +8,7 @@ import { MailboxActivity } from '@/components/mail/mailbox-activity';
 import { SenderScreening } from '@/components/mail/sender-screening';
 import { SenderCleanup } from '@/components/mail/sender-cleanup';
 import { SmartFolders } from '@/components/mail/smart-folders';
+import { MailboxAssets } from '@/components/mail/mailbox-assets';
 import { useLabels } from '@/hooks/use-labels';
 import { authProxy } from '@/lib/auth-proxy';
 import { useEffect, useState } from 'react';
@@ -29,6 +30,7 @@ const ALLOWED_FOLDERS = new Set([
   'activity',
   'cleanup',
   'smart',
+  'files',
 ]);
 
 type LabelNode = { id?: string; labels?: LabelNode[] };
@@ -104,5 +106,6 @@ export default function MailPage() {
   if (folder === 'activity') return <MailboxActivity />;
   if (folder === 'cleanup') return <SenderCleanup />;
   if (folder === 'smart') return <SmartFolders />;
+  if (folder === 'files') return <MailboxAssets />;
   return <MailLayout />;
 }

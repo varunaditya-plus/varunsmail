@@ -25,6 +25,7 @@ import {
   Mails,
   MessageSquareIcon,
   PackageOpen,
+  Paperclip,
 } from 'lucide-react';
 import { m } from '@/paraglide/messages';
 
@@ -132,6 +133,12 @@ export const navigationConfig: Record<string, NavConfig> = {
             title: 'Smart folders',
             url: '/mail/smart',
             icon: FolderSearch,
+          },
+          {
+            id: 'files',
+            title: 'Files & links',
+            url: '/mail/files',
+            icon: Paperclip,
           },
         ],
       },
