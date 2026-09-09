@@ -5,7 +5,6 @@ import {
   getThread,
   modifyThreadLabelsInDB,
   deleteAllSpam,
-  reSyncThread,
 } from '../../lib/server-utils';
 import {
   IGetThreadResponseSchema,
@@ -14,31 +13,24 @@ import {
   type IGetThreadsResponse,
   type ThreadListItem,
 } from '../../lib/driver/types';
-import { updateWritingStyleMatrix } from '../../services/writing-style-service';
-import type { DeleteAllSpamResponse, IEmailSendBatch } from '../../types';
+import type { DeleteAllSpamResponse } from '../../types';
 import { activeDriverProcedure, router, privateProcedure } from '../trpc';
 import { processEmailHtml } from '../../lib/email-processor';
 import { listMailboxThreads } from '../../lib/mailbox-list';
 import { runMailboxChanges } from '../../lib/mailbox-changes';
 import { recordMailboxAction, writeOutboxState } from '../../lib/mailbox-activity';
+import { sendMailboxEmail, sendMailInputSchema } from '../../lib/send-mail';
 import {
   decodeUnifiedInboxCursor,
   mergeUnifiedInboxPages,
   type UnifiedInboxPage,
 } from '../../lib/unified-inbox';
 import { defaultPageSize, FOLDERS } from '../../lib/utils';
-import { toAttachmentFiles } from '../../lib/attachments';
-import { serializedFileSchema } from '../../lib/schemas';
 import { getContext } from 'hono/context-storage';
 import { type HonoContext } from '../../ctx';
 import { TRPCError } from '@trpc/server';
 import { env } from '../../env';
 import { z } from 'zod';
-
-const senderSchema = z.object({
-  name: z.string().optional(),
-  email: z.string(),
-});
 
 const threadIdsSchema = z.object({
   ids: z.string().array(),
@@ -527,198 +519,17 @@ export const mailRouter = router({
     }),
 
   send: privateProcedure
-    .input(
-      z.object({
-        to: z.array(senderSchema),
-        subject: z.string(),
-        message: z.string(),
-        attachments: z.array(serializedFileSchema).optional().default([]),
-        headers: z.record(z.string()).optional().default({}),
-        cc: z.array(senderSchema).optional(),
-        bcc: z.array(senderSchema).optional(),
-        threadId: z.string().optional(),
-        fromEmail: z.string().optional(),
-        draftId: z.string().optional(),
-        isForward: z.boolean().optional(),
-        originalMessage: z.string().optional(),
-        scheduleAt: z.string().optional(),
-        connectionId: z.string().optional(),
-      }),
-    )
+    .input(sendMailInputSchema.extend({ connectionId: z.string().optional() }))
     .mutation(async ({ ctx, input }) => {
-      const { sessionUser } = ctx;
-      const { draftId, scheduleAt, attachments, connectionId, ...mail } = input;
-      const mailbox = await getOwnedConnection(sessionUser.id, connectionId);
-      const executionCtx = getContext<HonoContext>().executionCtx;
-      const agent = await getZeroAgent(mailbox.id, executionCtx);
-
-      const db = await getZeroDB(sessionUser.id);
-      const userSettings = await db.findUserSettings();
-      const undoSendEnabled = userSettings?.settings?.undoSendEnabled ?? false;
-      const shouldSchedule = !!scheduleAt || undoSendEnabled;
-
-      const afterTask = async () => {
-        try {
-          console.warn('Saving writing style matrix...');
-          await updateWritingStyleMatrix(mailbox.id, input.message);
-          console.warn('Saved writing style matrix.');
-        } catch (error) {
-          console.error('Failed to save writing style matrix', error);
-        }
-      };
-
-      if (shouldSchedule) {
-        const messageId = crypto.randomUUID();
-
-        // Validate scheduleAt if provided
-        let targetTime: number;
-        if (scheduleAt) {
-          const parsedTime = Date.parse(scheduleAt);
-          if (isNaN(parsedTime)) {
-            return { success: false, error: 'Invalid schedule date format' } as const;
-          }
-
-          const now = Date.now();
-
-          if (parsedTime <= now) {
-            return { success: false, error: 'Schedule time must be in the future' } as const;
-          }
-
-          targetTime = parsedTime;
-        } else {
-          targetTime = Date.now() + 15_000;
-        }
-
-        const rawDelaySeconds = Math.floor((targetTime - Date.now()) / 1000);
-        const pendingTtl = Math.max(86400, rawDelaySeconds + 86400);
-        const maxQueueDelay = 43200; // 12 hours
-        const isLongTerm = rawDelaySeconds > maxQueueDelay;
-
-        const {
-          pending_emails_status: statusKV,
-          pending_emails_payload: payloadKV,
-          scheduled_emails: scheduledKV,
-          send_email_queue,
-        } = env;
-
-        try {
-          await writeOutboxState(statusKV, messageId, {
-            status: 'pending',
-            sendAt: targetTime,
-            createdAt: Date.now(),
-            attempts: 0,
-          });
-        } catch (error) {
-          console.error(`Failed to write pending status to KV for message ${messageId}`, error);
-          return { success: false, error: 'Failed to schedule email status' } as const;
-        }
-
-        const mailPayload = {
-          ...mail,
-          draftId,
-          attachments,
-          connectionId: mailbox.id,
-        };
-
-        try {
-          await payloadKV.put(messageId, JSON.stringify(mailPayload), {
-            expirationTtl: pendingTtl,
-          });
-        } catch (error) {
-          console.error(`Failed to write email payload to KV for message ${messageId}`, error);
-          return { success: false, error: 'Failed to schedule email payload' } as const;
-        }
-
-        if (isLongTerm) {
-          try {
-            await scheduledKV.put(
-              messageId,
-              JSON.stringify({
-                messageId,
-                connectionId: mailbox.id,
-                sendAt: targetTime,
-              }),
-              { expirationTtl: Math.min(Math.ceil(rawDelaySeconds + 3600), 31556952) },
-            );
-          } catch (error) {
-            console.error(
-              `Failed to write long-term schedule to KV for message ${messageId}`,
-              error,
-            );
-            return { success: false, error: 'Failed to schedule email (long-term)' } as const;
-          }
-        } else {
-          const delaySeconds = rawDelaySeconds;
-          const queueBody: IEmailSendBatch = {
-            messageId,
-            connectionId: mailbox.id,
-            sendAt: targetTime,
-          };
-          try {
-            await send_email_queue.send(queueBody, { delaySeconds });
-          } catch (error) {
-            console.error(`Failed to enqueue email send for message ${messageId}`, error);
-            return { success: false, error: 'Failed to enqueue email send' } as const;
-          }
-        }
-
-        await recordMailboxAction(env, {
-          userId: sessionUser.id,
-          connectionId: mailbox.id,
-          messageId,
-          action: 'send email',
-          status: 'pending',
-          detail: scheduleAt ? 'Scheduled' : 'Undo-send window',
-        });
-        ctx.c.executionCtx.waitUntil(afterTask());
-
-        if (isLongTerm) {
-          return { success: true, scheduled: true, messageId, sendAt: targetTime };
-        } else {
-          return { success: true, queued: true, messageId, sendAt: targetTime };
-        }
-      }
-
-      const mailWithAttachments = {
-        ...mail,
-        attachments: attachments?.map((att: any) =>
-          typeof att?.arrayBuffer === 'function' ? att : toAttachmentFiles([att])[0],
-        ),
-      } as typeof mail & { attachments: any[] };
-
-      try {
-        if (draftId) {
-          await agent.stub.sendDraft(draftId, mailWithAttachments);
-        } else {
-          await agent.stub.create(mailWithAttachments);
-        }
-      } catch (error) {
-        ctx.c.executionCtx.waitUntil(
-          recordMailboxAction(env, {
-            userId: sessionUser.id,
-            connectionId: mailbox.id,
-            threadId: input.threadId,
-            action: input.threadId ? 'reply' : 'send email',
-            status: 'failed',
-            detail: error instanceof Error ? error.message : String(error),
-          }),
-        );
-        throw error;
-      }
-      ctx.c.executionCtx.waitUntil(
-        recordMailboxAction(env, {
-          userId: sessionUser.id,
-          connectionId: mailbox.id,
-          threadId: input.threadId,
-          action: input.threadId ? 'reply' : 'send email',
-          status: 'succeeded',
-        }),
-      );
-
-      console.log('[send] input.threadId:', input);
-
-      ctx.c.executionCtx.waitUntil(afterTask());
-      return { success: true };
+      const { connectionId, ...mail } = input;
+      const mailbox = await getOwnedConnection(ctx.sessionUser.id, connectionId);
+      return sendMailboxEmail({
+        env,
+        userId: ctx.sessionUser.id,
+        connectionId: mailbox.id,
+        input: mail,
+        waitUntil: (promise) => ctx.c.executionCtx.waitUntil(promise),
+      });
     }),
   unsend: privateProcedure
     .input(
