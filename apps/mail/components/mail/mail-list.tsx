@@ -18,7 +18,7 @@ import {
 import { useOptimisticThreadState } from '@/components/mail/optimistic-thread-state';
 import { focusedIndexAtom, useMailNavigation } from '@/hooks/use-mail-navigation';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { useIsFetching, type UseQueryResult } from '@tanstack/react-query';
+import { type UseQueryResult } from '@tanstack/react-query';
 import type { MailSelectMode, ParsedMessage, ThreadProps } from '@/types';
 import type { ParsedDraft } from '../../../server/src/lib/driver/types';
 import { ThreadContextMenu } from '@/components/context/thread-context';
@@ -31,7 +31,6 @@ import { EmptyStateIcon } from '../icons/empty-state-svg';
 import { highlightText } from '@/lib/email-utils.client';
 import { getAccountColor, parseThreadKey, threadKey } from '@/lib/thread-ref';
 import { cn, FOLDERS, formatDate } from '@/lib/utils';
-import { useTRPC } from '@/providers/query-provider';
 import { useThreadLabels } from '@/hooks/use-labels';
 import { useSettings } from '@/hooks/use-settings';
 import { useKeyState } from '@/hooks/use-hot-key';
@@ -649,8 +648,6 @@ export const MailList = memo(
       loadMore,
       partialFailures,
     ] = useThreads();
-    const trpc = useTRPC();
-    const isFetchingMail = useIsFetching({ queryKey: trpc.mail.get.queryKey() }) > 0;
     const itemsRef = useRef(items);
     const parentRef = useRef<HTMLDivElement>(null);
     const vListRef = useRef<VListHandle>(null);
@@ -863,7 +860,6 @@ export const MailList = memo(
         isLoading ||
         isFetching ||
         isFetchingNextPage ||
-        isFetchingMail ||
         !hasNextPage ||
         !list ||
         list.viewportSize <= 0 ||
@@ -881,7 +877,6 @@ export const MailList = memo(
       filteredItems.length,
       hasNextPage,
       isFetching,
-      isFetchingMail,
       isFetchingNextPage,
       isLoading,
       loadMore,
@@ -1001,7 +996,6 @@ export const MailList = memo(
                       Math.abs(filteredItems.length - 1 - endIndex) < 7 &&
                       !isLoading &&
                       !isFetchingNextPage &&
-                      !isFetchingMail &&
                       hasNextPage
                     ) {
                       void loadMore();
