@@ -24,6 +24,15 @@ import { env } from '../../env';
 import { Effect } from 'effect';
 import * as he from 'he';
 
+type ProviderCacheEntry = { expiresAt: number; value: unknown };
+
+const providerMemoryCache = new Map<string, ProviderCacheEntry>();
+const providerCacheLoads = new Map<string, Promise<unknown>>();
+const MEMORY_CACHE_TTL = 60 * 1000;
+const LABEL_CACHE_TTL = 60 * 60;
+const ALIAS_CACHE_TTL = 24 * 60 * 60;
+const COUNT_CACHE_TTL = 5 * 60;
+
 export class GoogleMailManager implements MailManager {
   private auth;
   private gmail;
@@ -57,6 +66,71 @@ export class GoogleMailManager implements MailManager {
 
     this.gmail = gmail({ version: 'v1', auth: this.auth });
   }
+
+  private providerCacheKey(resource: string) {
+    const account = `${this.config.auth.userId}:${this.config.auth.email.toLowerCase()}`;
+    return `gmail-provider:${account}:${resource}`;
+  }
+
+  private async getCachedProviderData<T>(resource: string, ttl: number, load: () => Promise<T>) {
+    const key = this.providerCacheKey(resource);
+    const now = Date.now();
+    const memory = providerMemoryCache.get(key);
+    if (memory && memory.expiresAt > now) return memory.value as T;
+
+    const pending = providerCacheLoads.get(key);
+    if (pending) return pending as Promise<T>;
+
+    const request = (async () => {
+      try {
+        const stored = await env.connection_labels.get(key);
+        if (stored) {
+          const cached = JSON.parse(stored) as ProviderCacheEntry;
+          if (cached.expiresAt > now) {
+            providerMemoryCache.set(key, {
+              expiresAt: Math.min(cached.expiresAt, now + MEMORY_CACHE_TTL),
+              value: cached.value,
+            });
+            return cached.value as T;
+          }
+        }
+      } catch (error) {
+        console.warn('[Gmail cache] Could not read provider metadata', resource, error);
+      }
+
+      const value = await load();
+      const expiresAt = Date.now() + ttl * 1000;
+      providerMemoryCache.set(key, {
+        expiresAt: Math.min(expiresAt, Date.now() + MEMORY_CACHE_TTL),
+        value,
+      });
+      try {
+        await env.connection_labels.put(key, JSON.stringify({ expiresAt, value }), {
+          expirationTtl: ttl,
+        });
+      } catch (error) {
+        console.warn('[Gmail cache] Could not store provider metadata', resource, error);
+      }
+      return value;
+    })().finally(() => providerCacheLoads.delete(key));
+
+    providerCacheLoads.set(key, request);
+    return request;
+  }
+
+  private async invalidateProviderData(...resources: string[]) {
+    await Promise.all(
+      resources.map(async (resource) => {
+        const key = this.providerCacheKey(resource);
+        providerMemoryCache.delete(key);
+        providerCacheLoads.delete(key);
+        await env.connection_labels.delete(key).catch((error) =>
+          console.warn('[Gmail cache] Could not invalidate provider metadata', resource, error),
+        );
+      }),
+    );
+  }
+
   public getScope(): string {
     return [
       'https://mail.google.com/',
@@ -148,34 +222,33 @@ export class GoogleMailManager implements MailManager {
   }
   public getEmailAliases() {
     return this.withErrorHandler('getEmailAliases', async () => {
-      const profile = await this.gmail.users.getProfile({
-        userId: 'me',
-      });
-
-      const primaryEmail = profile.data.emailAddress || '';
-      const aliases: { email: string; name?: string; primary?: boolean }[] = [
-        { email: primaryEmail, primary: true },
-      ];
-
-      const settings = await this.gmail.users.settings.sendAs.list({
-        userId: 'me',
-      });
-
-      if (settings.data.sendAs) {
-        settings.data.sendAs.forEach((alias) => {
-          if (alias.isPrimary && alias.sendAsEmail === primaryEmail) {
-            return;
-          }
-
-          aliases.push({
-            email: alias.sendAsEmail || '',
-            name: alias.displayName || undefined,
-            primary: alias.isPrimary || false,
-          });
+      return this.getCachedProviderData('aliases', ALIAS_CACHE_TTL, async () => {
+        const profile = await this.gmail.users.getProfile({
+          userId: 'me',
         });
-      }
 
-      return aliases;
+        const primaryEmail = profile.data.emailAddress || '';
+        const aliases: { email: string; name?: string; primary?: boolean }[] = [
+          { email: primaryEmail, primary: true },
+        ];
+
+        const settings = await this.gmail.users.settings.sendAs.list({
+          userId: 'me',
+        });
+
+        if (settings.data.sendAs) {
+          settings.data.sendAs.forEach((alias) => {
+            if (alias.isPrimary && alias.sendAsEmail === primaryEmail) return;
+            aliases.push({
+              email: alias.sendAsEmail || '',
+              name: alias.displayName || undefined,
+              primary: alias.isPrimary || false,
+            });
+          });
+        }
+
+        return aliases;
+      });
     });
   }
   public markAsRead(threadIds: string[]) {
@@ -301,7 +374,9 @@ export class GoogleMailManager implements MailManager {
           return mapped;
         });
 
-        return await Effect.runPromise(mainEffect);
+        return this.getCachedProviderData('counts', COUNT_CACHE_TTL, () =>
+          Effect.runPromise(mainEffect),
+        );
       },
       { email: this.config.auth?.email },
     );
@@ -733,36 +808,41 @@ export class GoogleMailManager implements MailManager {
     );
   }
   public async getUserLabels() {
-    const res = await this.gmail.users.labels.list({
-      userId: 'me',
+    return this.getCachedProviderData('labels', LABEL_CACHE_TTL, async () => {
+      const res = await this.gmail.users.labels.list({
+        userId: 'me',
+      });
+      return (
+        res.data.labels?.map((label) => ({
+          id: label.id ?? '',
+          name: label.name ?? '',
+          type: label.type ?? '',
+          color: mapGoogleLabelColor({
+            backgroundColor: label.color?.backgroundColor ?? '',
+            textColor: label.color?.textColor ?? '',
+          }),
+        })) ?? []
+      );
     });
-    // wtf google, null values for EVERYTHING?
-    return (
-      res.data.labels?.map((label) => ({
-        id: label.id ?? '',
-        name: label.name ?? '',
-        type: label.type ?? '',
-        color: mapGoogleLabelColor({
-          backgroundColor: label.color?.backgroundColor ?? '',
-          textColor: label.color?.textColor ?? '',
-        }),
-      })) ?? []
-    );
   }
   public async getLabel(labelId: string): Promise<Label> {
-    const res = await this.gmail.users.labels.get({
-      userId: 'me',
-      id: labelId,
+    const cached = (await this.getUserLabels()).find(({ id }) => id === labelId);
+    if (cached) return cached;
+    return this.getCachedProviderData(`label:${labelId}`, LABEL_CACHE_TTL, async () => {
+      const res = await this.gmail.users.labels.get({
+        userId: 'me',
+        id: labelId,
+      });
+      return {
+        id: labelId,
+        name: res.data.name ?? '',
+        color: mapGoogleLabelColor({
+          backgroundColor: res.data.color?.backgroundColor ?? '',
+          textColor: res.data.color?.textColor ?? '',
+        }),
+        type: res.data.type ?? 'user',
+      };
     });
-    return {
-      id: labelId,
-      name: res.data.name ?? '',
-      color: mapGoogleLabelColor({
-        backgroundColor: res.data.color?.backgroundColor ?? '',
-        textColor: res.data.color?.textColor ?? '',
-      }),
-      type: res.data.type ?? 'user',
-    };
   }
   public async createLabel(label: {
     name: string;
@@ -782,6 +862,8 @@ export class GoogleMailManager implements MailManager {
           : undefined,
       },
     });
+    this.labelIdCache = {};
+    await this.invalidateProviderData('labels', 'counts');
   }
   public async updateLabel(id: string, label: Label) {
     await this.gmail.users.labels.update({
@@ -797,12 +879,16 @@ export class GoogleMailManager implements MailManager {
           : undefined,
       },
     });
+    this.labelIdCache = {};
+    await this.invalidateProviderData('labels');
   }
   public async deleteLabel(id: string) {
     await this.gmail.users.labels.delete({
       userId: 'me',
       id: id,
     });
+    this.labelIdCache = {};
+    await this.invalidateProviderData('labels', `label:${id}`, 'counts');
   }
   public async revokeToken(token: string) {
     if (!token) return false;
