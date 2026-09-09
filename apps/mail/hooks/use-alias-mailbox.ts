@@ -1,6 +1,5 @@
 import { aliasMailboxes } from '@/config/alias-mailboxes';
 import { useConnections } from '@/hooks/use-connections';
-import { useEmailAliases } from '@/hooks/use-email-aliases';
 import { useLabels } from '@/hooks/use-labels';
 import { useQueryState } from 'nuqs';
 import { useMemo } from 'react';
@@ -14,7 +13,6 @@ export function useAliasMailbox() {
     (connection) => connection.email.toLowerCase() === definition.sourceEmail.toLowerCase(),
   );
   const labelsQuery = useLabels(sourceConnection?.id, !!sourceConnection);
-  const aliasesQuery = useEmailAliases(sourceConnection?.id ?? null);
 
   const mailbox = useMemo(() => {
     if (!sourceConnection) return null;
@@ -22,10 +20,7 @@ export function useAliasMailbox() {
     const label = labelsQuery.userLabels.find(
       (item) => item.name.toLowerCase() === definition.labelName.toLowerCase(),
     );
-    const alias = aliasesQuery.data.find(
-      (item) => item.email.toLowerCase() === definition.email.toLowerCase(),
-    );
-    if (!label?.id || !alias) return null;
+    if (!label?.id) return null;
 
     return {
       id: definition.id,
@@ -38,15 +33,14 @@ export function useAliasMailbox() {
       sourceConnectionId: sourceConnection.id,
       labelId: label.id,
     };
-  }, [definition, sourceConnection, labelsQuery.userLabels, aliasesQuery.data]);
+  }, [definition, sourceConnection, labelsQuery.userLabels]);
 
   const isResolving =
     isActive &&
     !mailbox &&
     (connectionsQuery.isLoading ||
       connectionsQuery.isFetching ||
-      (!!sourceConnection &&
-        (labelsQuery.isLoading || labelsQuery.isFetching || aliasesQuery.isFetching)));
+      (!!sourceConnection && (labelsQuery.isLoading || labelsQuery.isFetching)));
 
   return { mailbox, isActive, isResolving };
 }

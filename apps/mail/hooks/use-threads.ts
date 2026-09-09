@@ -42,7 +42,10 @@ export const useThreads = () => {
   );
   const connectionIds = accountFilter?.split(',').filter((id) => gmailConnectionIds.has(id)) ?? [];
   const unifiedLabels = labels.filter(isSharedGmailLabel);
-  const connectionLabels = aliasMailbox ? [...new Set([...labels, aliasMailbox.labelId])] : labels;
+  const connectionLabels =
+    isAliasMailboxActive && aliasMailbox
+      ? [...new Set([...labels, aliasMailbox.labelId])]
+      : labels;
 
   const unifiedQuery = useInfiniteQuery(
     trpc.mail.listUnifiedThreads.infiniteQueryOptions(

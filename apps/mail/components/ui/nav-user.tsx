@@ -19,7 +19,7 @@ import { useActiveConnection, useConnections } from '@/hooks/use-connections';
 import { useAliasMailbox } from '@/hooks/use-alias-mailbox';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useDoState } from '@/components/mail/use-do-state';
 import { useLoading } from '../context/loading-context';
 import { signOut, useSession } from '@/lib/auth-client';
@@ -100,6 +100,7 @@ export function NavUser() {
   const queryClient = useQueryClient();
   const { data: activeConnection, refetch: refetchActiveConnection } = useActiveConnection();
   const { mailbox: aliasMailbox, isActive: isAliasMailboxActive } = useAliasMailbox();
+  const isEnsuringAliasSourceRef = useRef(false);
   const [category] = useQueryState('category', { defaultValue: 'All Mail' });
   const { setLoading } = useLoading();
   const [{ isSyncing, syncingFolders, storageSize, shards }] = useDoState();
@@ -123,6 +124,30 @@ export function NavUser() {
   }, [activeConnection]);
 
   useEffect(() => setIsRendered(true), []);
+
+  useEffect(() => {
+    if (
+      !isAliasMailboxActive ||
+      !aliasMailbox ||
+      !activeConnection ||
+      activeConnection.id === aliasMailbox.sourceConnectionId ||
+      isEnsuringAliasSourceRef.current
+    ) {
+      return;
+    }
+
+    isEnsuringAliasSourceRef.current = true;
+    void setDefaultConnection({ connectionId: aliasMailbox.sourceConnectionId })
+      .then(() => {
+        queryClient.clear();
+        window.location.reload();
+      })
+      .catch((error) => {
+        isEnsuringAliasSourceRef.current = false;
+        console.error('Error opening custom mailbox:', error);
+        toast.error('Failed to open custom mailbox');
+      });
+  }, [activeConnection, aliasMailbox, isAliasMailboxActive, queryClient, setDefaultConnection]);
 
   const mailboxAccounts = useMemo(
     () => [...(data?.connections ?? []), ...(aliasMailbox ? [aliasMailbox] : [])],
