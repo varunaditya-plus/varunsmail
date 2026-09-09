@@ -6,7 +6,7 @@ Varunsmail exposes its private mailbox controls as a remote MCP server at:
 https://mail.varunaditya.space/mcp
 ```
 
-Use standard MCP OAuth discovery and authorization. The server publishes protected-resource metadata at `/.well-known/oauth-protected-resource` and authorization-server metadata at `/.well-known/oauth-authorization-server`. Browser session cookies are not MCP credentials.
+Use standard MCP OAuth discovery and authorization. Request the `mail:full` scope for mailbox access. The server publishes protected-resource metadata at `/.well-known/oauth-protected-resource` and authorization-server metadata at `/.well-known/oauth-authorization-server`. Browser session cookies are not MCP credentials.
 
 ## Accounts
 

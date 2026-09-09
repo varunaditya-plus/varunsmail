@@ -2,6 +2,7 @@ import { type Account, betterAuth, type BetterAuthOptions } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { getZeroDB, resetConnection } from './server-utils';
 import { jwt, bearer, mcp } from 'better-auth/plugins';
+import { getMcpPluginOptions } from './private-access';
 import { getSocialProviders } from './auth-providers';
 import { ownerAuthOptions } from './owner-auth';
 import { defaultUserSettings } from './schemas';
@@ -120,7 +121,7 @@ export const createAuth = () => {
 
   return betterAuth({
     ...config,
-    plugins: [mcp({ loginPage: env.VITE_PUBLIC_APP_URL + '/login' }), jwt(), bearer()],
+    plugins: [mcp(getMcpPluginOptions(env.VITE_PUBLIC_APP_URL + '/login')), jwt(), bearer()],
     databaseHooks: {
       ...config.databaseHooks,
       account: {

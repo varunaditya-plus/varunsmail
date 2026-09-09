@@ -2,7 +2,35 @@ type OwnerSession = { user: { id: string; email: string } } | null;
 type McpSession = {
   userId?: string | null;
   accessTokenExpiresAt?: unknown;
+  scopes?: unknown;
 } | null;
+
+export const MCP_FULL_MAIL_SCOPE = 'mail:full';
+export const MCP_AUTHORIZATION_SCOPES = [
+  'openid',
+  'profile',
+  'email',
+  'offline_access',
+  MCP_FULL_MAIL_SCOPE,
+];
+
+export function getMcpPluginOptions(loginPage: string) {
+  return {
+    loginPage,
+    oidcConfig: {
+      loginPage,
+      allowDynamicClientRegistration: true,
+      scopes: [MCP_FULL_MAIL_SCOPE],
+      defaultScope: `openid ${MCP_FULL_MAIL_SCOPE}`,
+      metadata: { scopes_supported: MCP_AUTHORIZATION_SCOPES },
+    },
+  };
+}
+
+export function getMcpAuthorizationServerMetadata(metadata: object | null) {
+  if (!metadata) return null;
+  return { ...metadata, scopes_supported: MCP_AUTHORIZATION_SCOPES };
+}
 
 export function getMcpProtectedResourceMetadata(appOrigin: string) {
   const origin = new URL(appOrigin).origin;
@@ -10,7 +38,7 @@ export function getMcpProtectedResourceMetadata(appOrigin: string) {
     resource: `${origin}/mcp`,
     authorization_servers: [origin],
     bearer_methods_supported: ['header'],
-    scopes_supported: ['openid', 'profile', 'email'],
+    scopes_supported: [MCP_FULL_MAIL_SCOPE],
     resource_name: 'Varunsmail',
   };
 }
@@ -21,8 +49,7 @@ export function unauthorizedMcpResponse(appOrigin: string) {
   return new Response('Unauthorized', {
     status: 401,
     headers: {
-      'WWW-Authenticate':
-        `Bearer resource_metadata="${resourceMetadata}", scope="openid profile email"`,
+      'WWW-Authenticate': `Bearer resource_metadata="${resourceMetadata}", scope="${MCP_FULL_MAIL_SCOPE}"`,
     },
   });
 }
@@ -74,11 +101,13 @@ export async function getOwnerMcpUserId(
   if (!headers.get('Authorization')?.startsWith('Bearer ')) return;
   const session = await options.getMcpSession(headers);
   const expiresAt = session?.accessTokenExpiresAt;
+  const scopes = typeof session?.scopes === 'string' ? session.scopes.split(/\s+/) : [];
   if (
     !session?.userId ||
     !(expiresAt instanceof Date) ||
     !Number.isFinite(expiresAt.getTime()) ||
-    expiresAt.getTime() <= Date.now()
+    expiresAt.getTime() <= Date.now() ||
+    !scopes.includes(MCP_FULL_MAIL_SCOPE)
   ) {
     return;
   }

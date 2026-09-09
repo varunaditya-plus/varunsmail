@@ -55,6 +55,7 @@ import { createDb, type DB } from './db';
 import { createAuth } from './lib/auth';
 import {
   authorizeAgentRequest,
+  getMcpAuthorizationServerMetadata,
   getMcpProtectedResourceMetadata,
   getOwnerMcpUserId,
   unauthorizedMcpResponse,
@@ -780,7 +781,12 @@ const app = new Hono<HonoContext>()
   )
   .get('/.well-known/oauth-authorization-server', async (c) => {
     const auth = createAuth();
-    return oAuthDiscoveryMetadata(auth)(c.req.raw);
+    const response = await oAuthDiscoveryMetadata(auth)(c.req.raw);
+    const metadata = getMcpAuthorizationServerMetadata(await response.json());
+    return new Response(JSON.stringify(metadata), {
+      status: response.status,
+      headers: response.headers,
+    });
   })
   .mount(
     '/sse',
