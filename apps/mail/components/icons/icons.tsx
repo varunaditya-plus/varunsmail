@@ -412,25 +412,6 @@ export const Archive = ({ className }: { className?: string }) => (
   </svg>
 );
 
-export const ExclamationCircle = ({ className }: { className?: string }) => (
-  <svg
-    className={className}
-    width="14"
-    height="14"
-    viewBox="0 0 14 14"
-    fill="none"
-    xmlns="http://www.w3.org/2000/svg"
-  >
-    <path
-      fillRule="evenodd"
-      clipRule="evenodd"
-      d="M7 13.5C10.5899 13.5 13.5 10.5899 13.5 7C13.5 3.41015 10.5899 0.5 7 0.5C3.41015 0.5 0.5 3.41015 0.5 7C0.5 10.5899 3.41015 13.5 7 13.5ZM7 3.28571C7.38463 3.28571 7.69643 3.59752 7.69643 3.98214V6.76786C7.69643 7.15248 7.38463 7.46429 7 7.46429C6.61537 7.46429 6.30357 7.15248 6.30357 6.76786V3.98214C6.30357 3.59752 6.61537 3.28571 7 3.28571ZM7 10.7143C7.51284 10.7143 7.92857 10.2986 7.92857 9.78571C7.92857 9.27288 7.51284 8.85714 7 8.85714C6.48716 8.85714 6.07143 9.27288 6.07143 9.78571C6.07143 10.2986 6.48716 10.7143 7 10.7143Z"
-      fill="var(--icon-color)"
-      fillOpacity="0.5"
-    />
-  </svg>
-);
-
 export const Bin = ({ className }: { className?: string }) => (
   <svg
     width="16"
@@ -1396,15 +1377,16 @@ export const Important = ({ className }: { className?: string }) => (
     width="16"
     height="16"
     viewBox="0 0 16 16"
-    fill="none"
     xmlns="http://www.w3.org/2000/svg"
     className={className}
   >
     <path
-      fillRule="evenodd"
-      clipRule="evenodd"
-      d="M8 14.5C11.5899 14.5 14.5 11.5899 14.5 8C14.5 4.41015 11.5899 1.5 8 1.5C4.41015 1.5 1.5 4.41015 1.5 8C1.5 11.5899 4.41015 14.5 8 14.5ZM8 4.28571C8.38463 4.28571 8.69643 4.59752 8.69643 4.98214V7.76786C8.69643 8.15248 8.38463 8.46429 8 8.46429C7.61537 8.46429 7.30357 8.15248 7.30357 7.76786V4.98214C7.30357 4.59752 7.61537 4.28571 8 4.28571ZM8 11.7143C8.51284 11.7143 8.92857 11.2986 8.92857 10.7857C8.92857 10.2729 8.51284 9.85714 8 9.85714C7.48716 9.85714 7.07143 10.2729 7.07143 10.7857C7.07143 11.2986 7.48716 11.7143 8 11.7143Z"
+      d="M2 3.25h8.25L14 8l-3.75 4.75H2L5.5 8 2 3.25Z"
+      strokeWidth="1.4"
+      strokeLinejoin="round"
     />
+    <path d="M8 5.4v3.2" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+    <circle cx="8" cy="10.55" r="0.7" fill="currentColor" stroke="none" />
   </svg>
 );
 

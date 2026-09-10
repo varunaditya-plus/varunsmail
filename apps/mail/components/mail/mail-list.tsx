@@ -1,7 +1,7 @@
 import {
   Archive2,
-  ExclamationCircle,
   GroupPeople,
+  Important,
   Star2,
   Trash,
   PencilCompose,
@@ -317,11 +317,11 @@ const Thread = memo(
                   )}
                   onClick={handleToggleImportant}
                 >
-                  <ExclamationCircle
+                  <Important
                     className={cn(
                       displayImportant
-                        ? 'fill-orange-400 stroke-orange-500'
-                        : 'fill-transparent stroke-[#9D9D9D]',
+                        ? 'fill-amber-400 stroke-amber-500 text-amber-950'
+                        : 'fill-transparent stroke-[#9D9D9D] text-[#9D9D9D]',
                     )}
                   />
                 </Button>

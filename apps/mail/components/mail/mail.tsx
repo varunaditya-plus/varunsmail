@@ -5,7 +5,7 @@ import {
   DropdownMenuTrigger,
 } from '../ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { Bell, Lightning, Mail, ScanEye, Tag, User, X } from '../icons/icons';
+import { Bell, Important, Mail, ScanEye, Tag, User, X } from '../icons/icons';
 import { useCategorySettings, useDefaultCategoryId } from '@/hooks/use-categories';
 import { useHotkeys, useHotkeysContext } from 'react-hotkeys-hook';
 import { ThreadDisplay } from '@/components/mail/thread-display';
@@ -555,8 +555,11 @@ export const Categories = () => {
         return {
           ...base,
           icon: (
-            <Lightning
-              className={cn('fill-muted-foreground dark:fill-white', isSelected && 'fill-white')}
+            <Important
+              className={cn(
+                'fill-muted-foreground/15 stroke-muted-foreground text-muted-foreground dark:fill-white/15 dark:stroke-white dark:text-white',
+                isSelected && 'fill-white/20 stroke-white text-white',
+              )}
             />
           ),
         };

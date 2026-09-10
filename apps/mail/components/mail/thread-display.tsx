@@ -2,7 +2,7 @@ import {
   Archive,
   ArchiveX,
   Folders,
-  Lightning,
+  Important,
   Mail,
   Printer,
   Reply,
@@ -964,7 +964,7 @@ export function ThreadDisplay() {
                     )}
                     {!isImportant && (
                       <DropdownMenuItem onClick={handleToggleImportant}>
-                        <Lightning className="fill-iconLight dark:fill-iconDark mr-2" />
+                        <Important className="mr-2 h-4 w-4 fill-transparent stroke-current text-current" />
                         {m['common.mail.markAsImportant']()}
                       </DropdownMenuItem>
                     )}

@@ -29,7 +29,7 @@ import {
 import { useOptimisticThreadState } from '@/components/mail/optimistic-thread-state';
 import { LabelDialog } from '@/components/labels/label-dialog';
 import { useOptimisticActions } from '@/hooks/use-optimistic-actions';
-import { ExclamationCircle, Mail, Clock } from '../icons/icons';
+import { Important, Mail, Clock } from '../icons/icons';
 import { SnoozeDialog } from '@/components/mail/snooze-dialog';
 import { ReminderDialog } from '@/components/mail/reminder-dialog';
 import { RuleDialog } from '@/components/mail/rule-dialog';
@@ -601,7 +601,7 @@ export function ThreadContextMenu({
         label: isImportant
           ? m['common.mail.removeFromImportant']()
           : m['common.mail.markAsImportant'](),
-        icon: <ExclamationCircle className="mr-2.5 h-4 w-4 fill-[#9D9D9D] dark:fill-[#9D9D9D]" />,
+        icon: <Important className="mr-2.5 h-4 w-4 fill-transparent stroke-[#9D9D9D] text-[#9D9D9D]" />,
         action: handleToggleImportant,
       },
       {

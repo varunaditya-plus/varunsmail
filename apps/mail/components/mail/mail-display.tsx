@@ -4,7 +4,7 @@ import {
   Figma,
   Forward,
   ImageFile,
-  Lightning,
+  Important,
   PDF,
   Reply,
   ReplyAll,
@@ -177,7 +177,7 @@ const MailDisplayLabels = ({ labels }: { labels: string[] }) => {
 
         switch (normalizedLabel) {
           case 'important':
-            icon = <Lightning className="h-3.5 w-3.5 fill-white" />;
+            icon = <Important className="h-3.5 w-3.5 fill-white/20 stroke-white text-white" />;
             bgColor = 'bg-[#F59E0D]';
             labelText = m['common.mailCategories.important']();
             break;
