@@ -24,10 +24,10 @@ export const Toolbar = ({ editor }: { editor: Editor | null }) => {
   if (!editor) return null;
 
   return (
-    <div className="flex gap-2 rounded border p-2 text-sm">
+    <div className="w-full overflow-x-auto rounded border p-2 text-sm [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
       <TooltipProvider>
-        <div className="control-group overflow-x-auto">
-          <div className="button-group ml-0 flex flex-wrap gap-1">
+        <div className="control-group min-w-max">
+          <div className="button-group ml-0 flex items-center gap-1">
             <div className="mr-2 flex items-center gap-1">
               <Tooltip>
                 <TooltipTrigger asChild>
