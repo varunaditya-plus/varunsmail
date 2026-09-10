@@ -30,7 +30,7 @@ The Barcelona Hackathon mailbox is exposed as `alias:barcelonahackathon`. It sen
 - `mail_assets`, `mail_smart_folders`, and `mail_cleanup`: file/link search, saved searches, and sender cleanup.
 - `mail_reminders`, `mail_screening`, and `mail_rules`: reply reminders, first-sender decisions, and Gmail-backed rules.
 - `mail_bundles` and `mail_focus`: scheduled bundles and the Focus and Reply queue.
-- `mail_notes` and `mail_templates`: private thread notes, templates, and snippets.
+- `mail_notes`: private notes attached to mail threads.
 - `mail_settings`: owner mail, privacy, appearance, and notification settings.
 - `current_date`: the date and time context used by Varunsmail.
 

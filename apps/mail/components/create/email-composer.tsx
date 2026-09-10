@@ -52,7 +52,6 @@ import { compressImages } from '@/lib/image-compression';
 import type { ImageQuality } from '@/lib/image-compression';
 
 const shortcodeRegex = /:([a-zA-Z0-9_+-]+):/g;
-import { TemplateButton } from './template-button';
 
 type ThreadContent = {
   from: string;
@@ -255,9 +254,6 @@ export function EmailComposer({
   });
 
   const { watch, setValue, getValues } = form;
-  const toEmails = watch('to');
-  const ccEmails = watch('cc');
-  const bccEmails = watch('bcc');
   const subjectInput = watch('subject');
   const attachments = watch('attachments');
   const fromEmail = watch('fromEmail');
@@ -863,21 +859,6 @@ export function EmailComposer({
               <Plus className="h-3 w-3 fill-[#9A9A9A]" />
               <span className="hidden px-0.5 text-sm md:block">Add</span>
             </Button>
-            <TemplateButton
-              editor={editor}
-              subject={subjectInput}
-              setSubject={(value) => setValue('subject', value)}
-              to={toEmails}
-              cc={ccEmails ?? []}
-              bcc={bccEmails ?? []}
-              senderEmail={fromEmail || composerConnection?.email}
-              senderName={
-                aliases?.find((alias) => alias.email === fromEmail)?.name ??
-                composerConnection?.name ??
-                undefined
-              }
-              setRecipients={(field, val) => setValue(field, val)}
-            />
             <Input
               type="file"
               id="attachment-input"

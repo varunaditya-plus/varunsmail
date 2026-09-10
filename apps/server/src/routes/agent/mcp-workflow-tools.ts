@@ -1,6 +1,5 @@
 import { defaultUserSettings, userSettingsSchema } from '../../lib/schemas';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { TemplatesManager } from '../../lib/templates-manager';
 import { MailboxWorkflows } from '../../lib/mailbox-workflows';
 import { NotesManager } from '../../lib/notes-manager';
 import { getZeroDB } from '../../lib/server-utils';
@@ -119,7 +118,6 @@ function publicSettings(settings: typeof defaultUserSettings) {
 export function registerMcpWorkflowTools(server: McpServer, userId: string) {
   const workflows = new MailboxWorkflows(env, userId);
   const notes = new NotesManager();
-  const templates = new TemplatesManager();
 
   server.registerTool(
     'mail_activity',
@@ -568,49 +566,6 @@ export function registerMcpWorkflowTools(server: McpServer, userId: string) {
         case 'reorder':
           return result({
             reordered: await notes.reorderNotes(userId, required(input.notes, 'notes')),
-          });
-      }
-    },
-  );
-
-  server.registerTool(
-    'mail_templates',
-    {
-      title: 'Email templates and snippets',
-      description: 'List, create, or delete reusable email templates and variable snippets.',
-      inputSchema: {
-        action: z.enum(['list', 'create', 'delete']),
-        id: itemId,
-        name: z.string().min(1).max(100).optional(),
-        kind: z.enum(['template', 'snippet']).optional(),
-        subject: z.string().max(500).optional(),
-        body: z.string().max(50_000).optional(),
-        to: z.array(z.string()).optional(),
-        cc: z.array(z.string()).optional(),
-        bcc: z.array(z.string()).optional(),
-      },
-      outputSchema,
-      annotations: localWriteAnnotations,
-    },
-    async (input) => {
-      switch (input.action) {
-        case 'list':
-          return result({ templates: await templates.listTemplates(userId) });
-        case 'create':
-          return result({
-            template: await templates.createTemplate(userId, {
-              name: required(input.name, 'name'),
-              kind: input.kind ?? 'template',
-              subject: input.subject ?? '',
-              body: input.body ?? '',
-              to: input.to,
-              cc: input.cc,
-              bcc: input.bcc,
-            }),
-          });
-        case 'delete':
-          return result({
-            deleted: await templates.deleteTemplate(userId, required(input.id, 'id')),
           });
       }
     },

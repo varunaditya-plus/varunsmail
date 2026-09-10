@@ -13,7 +13,6 @@ const mocks = vi.hoisted(() => ({
   notes: {
     getThreadNotes: vi.fn(),
   },
-  templates: {},
   db: {
     findUserConnection: vi.fn(),
     findUserSettings: vi.fn(),
@@ -35,13 +34,6 @@ vi.mock('../../lib/notes-manager', () => ({
   NotesManager: class {
     constructor() {
       return mocks.notes;
-    }
-  },
-}));
-vi.mock('../../lib/templates-manager', () => ({
-  TemplatesManager: class {
-    constructor() {
-      return mocks.templates;
     }
   },
 }));
@@ -83,7 +75,7 @@ beforeEach(() => {
 });
 
 describe('MCP workflow tools', () => {
-  it('registers every workflow, notes, templates, and settings family', () => {
+  it('registers every workflow, notes, and settings family', () => {
     const { tools } = setup();
 
     expect([...tools.keys()]).toEqual([
@@ -97,7 +89,6 @@ describe('MCP workflow tools', () => {
       'mail_bundles',
       'mail_focus',
       'mail_notes',
-      'mail_templates',
       'mail_settings',
     ]);
   });
